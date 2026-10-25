@@ -1,5 +1,6 @@
-"""One explicitly paired owner's private text messages."""
+"""One owner's private messages and isolated Telegram guest threads."""
 import asyncio
+import logging
 from pathlib import Path
 import secrets
 from collections import deque
@@ -8,6 +9,84 @@ from aiogram import Bot, Dispatcher, F, Router
 from .config import Pairing
 from .engine import Engine, SteerResult
 from .telegram import deliver
+from .guest import GuestService
+from .guest_engine import GuestEngine
+from .guest_threads import GuestThreadStore, ThreadError
+from .engine import EngineError
+
+log = logging.getLogger(__name__)
+
+
+class OmpRuntime:
+    """Serialize children sharing auth/config; restart the owner lazily after guest."""
+    def __init__(self, owner, guest):
+        self.owner, self.guest = owner, guest
+        self.lock = asyncio.Lock()
+        self.owner_ready = True
+        self.safe = True
+
+    def _check(self):
+        if not self.safe or not self.guest.safe:
+            raise EngineError('OMP teardown unconfirmed; restart Capri')
+
+    async def stream(self, text):
+        async with self.lock:
+            self._check()
+            if not self.owner_ready:
+                start = asyncio.create_task(self.owner.start())
+                try:
+                    await asyncio.shield(start)
+                except asyncio.CancelledError:
+                    try:
+                        await start
+                    except Exception:
+                        pass
+                    finally:
+                        if self.owner.client is not None:
+                            try:
+                                self.safe = await asyncio.to_thread(self.owner.client.stop) is True
+                            except Exception:
+                                self.safe = False
+                            if self.safe: self.owner.client = None
+                    raise
+                self.owner_ready = True
+            stream = self.owner.stream(text)
+            try:
+                async for part in stream: yield part
+            finally:
+                await stream.aclose()
+
+    async def steer(self, text):
+        if not self.owner_ready or self.lock.locked() and not self.owner._active:
+            return SteerResult.NOT_ACTIVE
+        return await self.owner.steer(text)
+
+    async def stream_guest(self, directory, **kwargs):
+        async with self.lock:
+            self._check()
+            if self.owner_ready:
+                stop = asyncio.create_task(asyncio.to_thread(self.owner.client.stop))
+                try:
+                    self.safe = await asyncio.shield(stop)
+                except asyncio.CancelledError:
+                    try:
+                        self.safe = await stop
+                    except Exception:
+                        self.safe = False
+                    finally:
+                        self.owner_ready = False
+                        if self.safe: self.owner.client = None
+                    raise
+                except Exception:
+                    self.safe = False
+                self.owner_ready = False
+                self._check()
+                self.owner.client = None
+            stream = self.guest.stream(directory, **kwargs)
+            try:
+                async for part in stream: yield part
+            finally:
+                await stream.aclose()
 
 
 class InboundFlow:
@@ -112,23 +191,41 @@ async def run(token: str, executable: Path, data: Path):
     bot = Bot(token)
     dp = Dispatcher()
     pairing = Pairing(data / 'owner.json')
-    lock = InboundFlow(bot, engine)
+    runtime = OmpRuntime(engine, GuestEngine(executable, data))
+    lock = InboundFlow(bot, runtime)
+    guest = None
     router = Router()
     @router.message(F.text)
     async def on_text(message):
         await handle_text(message, bot, engine, pairing, lock)
+    @router.guest_message()
+    async def on_guest(message):
+        if guest is not None:
+            await guest.handle(message)
     dp.include_router(router)
     try:
         await engine.start()
         me = await bot.get_me()
+        capability = getattr(me, 'supports_guest_queries', None)
+        print(f'Guest Mode supports_guest_queries={capability}', flush=True)
+        if capability is True:
+            try:
+                guest = GuestService(bot, lambda: pairing.owner_id, me.username,
+                                     GuestThreadStore(data), runtime)
+            except (ThreadError, OSError):
+                print('Guest Mode unavailable: guest thread store is invalid; DM remains enabled.', flush=True)
+        else:
+            print('Enable Guest Mode in @BotFather → Bot Settings. DM remains enabled.', flush=True)
         if pairing.nonce:
             command = '/start ' + pairing.nonce
             (data / 'pairing.txt').write_text(command, encoding='utf-8')
             print(f'Pair @{me.username} with: {command}', flush=True)
         else:
             print(f'Capri @{me.username} ready for owner {pairing.owner_id}', flush=True)
-        await dp.start_polling(bot, allowed_updates=['message'], close_bot_session=False)
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), close_bot_session=False)
     finally:
+        if guest is not None:
+            await guest.close()
         await lock.stop()
         await engine.close()
         await bot.session.close()

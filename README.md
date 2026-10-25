@@ -2,6 +2,7 @@
 
 Windows x64 / Python 3.14, official OMP Python RPC SDK, aiogram long polling.
 One explicitly paired owner, private text, throttled live drafts and streamed durable bubbles.
+Owner-only Telegram Guest Mode uses separate persistent chat-scoped Luna threads.
 OMP owns the conversation and persistent session. Its existing Codex search is pinned to Luna.
 
 ## Run this verified checkout
@@ -14,8 +15,70 @@ The local environment and pinned dependencies have been prepared under `.venv` a
 
 The token is read from `.runtime/bot-token`. It is never a command-line argument or tracked file.
 On first launch the terminal prints a one-time `/start <nonce>` command for the owner.
-Other users and group messages are ignored. Restarting before pairing invalidates the nonce.
+Other users and ordinary group messages are ignored. Authorized guest updates are handled separately.
+Restarting before pairing invalidates the nonce.
 Owner identity persists in `.runtime/owner.json`; OMP data persists in `.runtime/agent`.
+
+## Telegram-only Guest transport probe
+
+This opt-in test creates no Engine and accesses no OMP session. Stop the normal
+poller first: the same token must have only one poller. Private DM is temporarily
+unavailable while the probe runs. From this checkout with its prepared Python:
+
+```powershell
+python -m capri.cli --data <existing-runtime-directory> --guest-probe answer
+```
+
+An existing valid owner.json is required; missing/malformed pairing refuses before
+any Telegram API call. Startup checks supports_guest_queries=True, otherwise
+reports the required Guest Mode setting in @BotFather. Polling subscribes only to
+the registered guest_message handler through resolve_used_update_types().
+
+As the paired owner, send `Тест @Capriompbot` in a human DM/group where Capri is
+absent. A real authorized sender receives exactly one `Guest OK` via
+answerGuestQuery. Anonymous/chat/bot senders fail closed. This does not use inline
+search results selected while typing. Failures never fall back to ordinary sends.
+The short-lived process deduplicates query IDs in memory, including failed attempts.
+
+The first live gate passed on 2026-10-25: an authorized owner summon produced a
+visible Guest OK. For the second transport test, use `--guest-probe edit`: one
+Думаю… reply changes after 2 seconds to Guest OK final using the returned inline
+message ID. No extra reply or model work is involved; failed API calls are not retried.
+
+Both transport gates passed. The probe remains a separate diagnostic utility.
+See docs/verification/guest-transport.md for its evidence.
+
+## Guest Luna threads
+
+Normal startup handles both owner DM and guest_message in one poller. Enable Guest
+Mode in @BotFather; unsupported capability warns without disabling owner DM.
+In a supported human chat where Capri is absent, send `@Capriompbot <request>`.
+Only the paired owner's real sender identity is accepted. Replies use one
+answerGuestQuery result, then edit that same inline message. Public model commentary
+accumulates during tools with an animated dot suffix. If no public text arrives
+within 1.2 seconds, the first result is only `·`; there is no fixed "Думаю…".
+Answer and edits share a 0.9-second pacing interval, including the final edit.
+The completed model answer replaces all progress. Reasoning and tool payloads
+are never displayed. No ordinary send or DM fallback.
+Long replies are visibly truncated to 4096 UTF-16 units.
+
+Each chat has its own persistent threads under `.runtime/guest/sessions/<chat>/<thread>`.
+There is no automatic expiry. Commands after the mention are local, without Luna:
+`/newthread [title]` (alias `/new`), `/threads`, `/resume [ID/prefix/title]`,
+`/title <name>`, `/status`. Resume without an argument lists threads. Ambiguous
+selectors are rejected. While a guest turn is active, only listing/status is allowed.
+Reply text/caption is passed as quoted, untrusted reference data; no broader history
+or owner transcript is read. Tools are exactly web_search; model is gpt-6-luna.
+
+Only one guest turn runs at a time; a second receives a brief busy answer.
+OMP children sharing the existing auth/config root are serialized: a guest waits
+for an active owner turn, stops the idle owner child, and runs its own child.
+The next DM lazily resumes the unchanged owner pointer. This adds startup latency;
+DM messages wait while guest work runs. Unconfirmed child teardown blocks further
+OMP work until restart rather than risking simultaneous children.
+
+Automated and real OMP checks passed; production Telegram scenarios still need
+owner confirmation. See docs/verification/guest-luna-threads.md.
 
 Stop with Ctrl+C. After an OMP failure/timeout, restart Capri to resume its persisted session.
 Owner messages during a reply are debounced for 500 ms and submitted via native OMP steering.
