@@ -2,9 +2,16 @@
 import asyncio
 import json
 from pathlib import Path
+from enum import Enum, auto
 from omp_rpc import RpcClient
 from .config import OMP_CONFIG, write_json
 from .prompt import CAPRI_CONVERSATION_PROMPT
+
+
+class SteerResult(Enum):
+    ACCEPTED = auto()
+    NOT_ACTIVE = auto()
+    UNSUPPORTED = auto()
 
 
 class EngineError(RuntimeError):
@@ -114,16 +121,18 @@ class Engine:
                         await task
                         self._aborting = False
 
-    async def steer(self, text: str) -> bool:
+    async def steer(self, text: str) -> SteerResult:
         """Use the SDK's concurrent command path, never the prompt lifecycle lock.
 
-        False means definitely not submitted: the transport may keep it FIFO.
+        NOT_ACTIVE and UNSUPPORTED mean not submitted: keep the input FIFO.
         Ambiguous failures are raised; blindly resubmitting could duplicate input.
         """
         async with self._steer_lock:
             method = getattr(self.client, 'steer', None)
-            if not self._active or self._failed or not callable(method):
-                return False
+            if not self._active or self._failed:
+                return SteerResult.NOT_ACTIVE
+            if not callable(method):
+                return SteerResult.UNSUPPORTED
             try:
                 await asyncio.to_thread(method,
                     'Capri input JSON:\n' + json.dumps({'text': text}, ensure_ascii=False))
@@ -131,9 +140,9 @@ class Engine:
                 from omp_rpc import RpcError
                 if isinstance(exc, RpcError) and ('unknown command' in str(exc).lower()
                         or 'not supported' in str(exc).lower()):
-                    return False
+                    return SteerResult.UNSUPPORTED
                 raise EngineError('OMP steering acknowledgement failed; input delivery is uncertain') from None
-            return True
+            return SteerResult.ACCEPTED
 
     async def close(self):
         if self.client is not None:
