@@ -9,13 +9,6 @@ DISCOVERY_PROVIDERS = ['agent-plugins', 'agents', 'agents-md', 'claude', 'claude
     'ssh-json', 'vscode', 'windsurf']
 OMP_CONFIG = {'modelRoles': {'web': 'openai-codex/gpt-6-luna'},
               'mcp': {'enableProjectConfig': False},
-              'tools': {'approvalMode': 'write'},
-              'find': {'enabled': 'on'},
-              # Exact commands only: wildcard flags can enable writes or helpers.
-              'bash': {'patterns': [
-                  {'match': command, 'approval': 'allow'} for command in (
-                      'git status', 'git diff', 'git log', 'git show',
-                      'python --version', 'node --version')]},
               'disabledProviders': DISCOVERY_PROVIDERS}
 
 

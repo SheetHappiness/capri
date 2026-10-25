@@ -1,25 +1,4 @@
-import json
-from capri.config import OMP_CONFIG, Pairing
-
-
-def test_native_approval_config_written_for_omp(tmp_path):
-    from capri.config import write_json
-    path = tmp_path/'agent/config.yml'
-    write_json(path, OMP_CONFIG)
-    config = json.loads(path.read_text(encoding='utf-8'))
-    assert config['find']['enabled'] == 'on'
-    assert config['tools']['approvalMode'] == 'write'
-    assert config['tools'].get('approval', {}).get('bash') != 'allow'
-    assert config['bash']['patterns'] == [
-        {'match': 'git status', 'approval': 'allow'},
-        {'match': 'git diff', 'approval': 'allow'},
-        {'match': 'git log', 'approval': 'allow'},
-        {'match': 'git show', 'approval': 'allow'},
-        {'match': 'python --version', 'approval': 'allow'},
-        {'match': 'node --version', 'approval': 'allow'},
-    ]
-    assert config['bash'].get('allowCompoundCommands', False) is False
-
+from capri.config import Pairing
 
 def test_explicit_one_time_pairing_and_persistence(tmp_path):
     p=Pairing(tmp_path/'owner.json')

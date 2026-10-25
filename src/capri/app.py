@@ -7,14 +7,13 @@ from collections import deque
 from contextlib import suppress
 from aiogram import Bot, Dispatcher, F, Router
 from .config import Pairing
-from .approval import ApprovalBridge, PREFIX as APPROVAL_PREFIX
 from .engine import Engine, SteerResult
 from .telegram import deliver
 from .guest import GuestService
 from .guest_engine import GuestEngine
 from .guest_threads import GuestThreadStore, ThreadError
 from .engine import EngineError
-from .teardown import complete_cleanup, join_cleanup, stop_child
+from .teardown import join_cleanup, stop_child
 
 log = logging.getLogger(__name__)
 
@@ -192,12 +191,10 @@ async def handle_text(message, bot, engine, pairing, lock):
 
 
 async def run(token: str, executable: Path, data: Path):
-    pairing = Pairing(data / 'owner.json')
+    engine = Engine(executable, data)
     bot = Bot(token)
-    approvals = ApprovalBridge(bot, lambda: pairing.owner_id)
-    engine = Engine(executable, data, approve=approvals.request,
-                    approval_notice=approvals.notice)
     dp = Dispatcher()
+    pairing = Pairing(data / 'owner.json')
     runtime = OmpRuntime(engine, GuestEngine(executable, data))
     lock = InboundFlow(bot, runtime)
     guest = None
@@ -205,9 +202,6 @@ async def run(token: str, executable: Path, data: Path):
     @router.message(F.text)
     async def on_text(message):
         await handle_text(message, bot, engine, pairing, lock)
-    @router.callback_query(F.data.startswith(APPROVAL_PREFIX))
-    async def on_approval(query):
-        await approvals.handle_callback(query)
     @router.guest_message()
     async def on_guest(message):
         if guest is not None:
@@ -234,11 +228,8 @@ async def run(token: str, executable: Path, data: Path):
             print(f'Capri @{me.username} ready for owner {pairing.owner_id}', flush=True)
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), close_bot_session=False)
     finally:
-        async def cleanup():
-            await approvals.close()
-            if guest is not None:
-                await guest.close()
-            await lock.stop()
-            await engine.close()
-            await bot.session.close()
-        await complete_cleanup(cleanup())
+        if guest is not None:
+            await guest.close()
+        await lock.stop()
+        await engine.close()
+        await bot.session.close()
