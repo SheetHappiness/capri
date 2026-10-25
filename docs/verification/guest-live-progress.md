@@ -59,7 +59,7 @@ Both runs:1 answer attempt,8 edits; delivered terminal text exactly matched clea
 Startup observed:
 ```
 Guest Mode supports_guest_queries=True
-Capri @Capriompbot ready for owner5169573014
+Capri @Capriompbot ready for owner[redacted]
 2026-10-25 17:58:53 Start polling
 ```
 

@@ -14,7 +14,7 @@ stages were confirmed live by the owner; this is not proof of all new Luna scena
 Production startup at 17:28:43 Europe/Warsaw reported:
 
     Guest Mode supports_guest_queries=True
-    Capri @Capriompbot ready for owner 5169573014
+    Capri @Capriompbot ready for owner [redacted]
     Start polling
     Run polling for bot @Capriompbot
 

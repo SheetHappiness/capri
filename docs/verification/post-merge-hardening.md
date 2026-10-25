@@ -1,7 +1,8 @@
 # Post-merge hardening — 2026-10-25
 
 Execution follows `docs/superpowers/plans/2026-10-25-post-merge-hardening.md` from
-`c8db996` on `codex/post-merge-hardening`. Application changes have not been deployed
+`c8db996` on `codex/post-merge-hardening`, integrated and pushed to main as
+`f442c4c`. Application changes have not been deployed
 to the running bot. No Telegram messages or model prompts were sent in this work.
 
 ## Correctness evidence (tasks 1–2)
@@ -75,8 +76,12 @@ ready; the acceptance command was corrected to select Luna without prompting it.
 
 ## Remaining acceptance
 
-Real authenticated prompts and Telegram UX are not revalidated here. Remote Actions
-success and required branch protection are pending publication/admin authorization.
+Real authenticated prompts and Telegram UX are not revalidated here. Required
+branch protection remains pending separate repository-administration authorization.
+
+[Remote Actions run 40225164561](https://github.com/SheetHappiness/capri/actions/runs/40225164561)
+completed successfully on main at `f442c4c` on 2026-10-25. The Windows Python 3.14
+job passed; the owner also inspected its output and confirmed all 208 tests passed.
 
 ## Cleanup evidence (tasks 3–7)
 
@@ -104,12 +109,37 @@ no Critical, Important or Minor findings. Reviewer independently ran the full su
 the clean archive-pinned environment: **208 passed in 4.96 seconds**; `pip check`
 reported no broken requirements. The OMP binary hash also matches the documented pin.
 
-Authenticated Telegram UX, actual conversation continuity, remote Actions/branch
-protection and broader Windows descendant-process termination were not judged by
-the reviewer. They remain outside this local verification: no live deployment,
-model prompt or remote publication occurred, and the documented SDK guarantee is
-the Windows leader process only. No deferred review findings remain.
+Authenticated Telegram UX, actual conversation continuity, branch protection and
+broader Windows descendant-process termination were not judged by the reviewer.
+They remain outside this verification: no live deployment or model prompt occurred,
+and the documented SDK guarantee is the Windows leader process only. Remote
+publication and Actions acceptance were completed after the local review.
+No deferred correctness review findings remain.
 
 The managed worktree denied filesystem writes, so implementation used the allowed
-original checkout on a dedicated branch. The application/test changes remain
-uncommitted pending the owner's integration choice.
+original checkout on a dedicated branch. Commit `f442c4c` was subsequently merged
+into local main and pushed to origin/main at the owner's request.
+
+## Delivery semantics limit
+
+If OMP has persisted a turn before a final Telegram edit returns UNCERTAIN, the
+next model turn can remember a response the user may not have received. Activity
+is not touched without ACK, but the persistent transcript has already advanced.
+This is an acknowledged delivery ambiguity; no automatic retry or transcript
+rollback is introduced.
+
+## Post-review CI/documentation cleanup
+
+- Checkout v7.0.1 and setup-python v7.1.0 are pinned to their official release
+  commit SHAs. Both action manifests declare Node 24.
+- Full history is fetched. Whitespace checks compare push before/after commits,
+  or the PR merge-base to its head; a new branch compares against the empty tree.
+  The PowerShell step explicitly returns Git's exit code.
+- Parsed workflow YAML and exercised its exact PowerShell body against six local
+  Git fixtures: clean push, multi-commit push with an earlier whitespace error,
+  clean/error initial pushes, PR with an error, and clean PR diverging from a base
+  with an unrelated error. Clean cases returned 0; error cases returned 2.
+- Full local suite: **208 passed in 5.00 seconds**. Production code is unchanged.
+  This validates the cleanup locally; its own remote run requires publication.
+- Removed the local attachment path and redacted owner identifiers from historical
+  verification examples. Existing Git history is unchanged.

@@ -164,8 +164,11 @@ git diff --check
 retain their declared version floors. Unit/integration tests require no OMP binary,
 login, bot token or Telegram connectivity.
 The `Tests` workflow runs `Windows Python 3.14` on pull requests and pushes to main.
-Its YAML and install/test commands have been validated locally. A green remote run
-and a required branch check remain pending publication and repository configuration;
+Its YAML and install/test commands have been validated locally.
+[Remote run 40225164561](https://github.com/SheetHappiness/capri/actions/runs/40225164561)
+succeeded at `f442c4c` on main. Whitespace checks compare the complete push range
+or the PR merge-base to its head; Actions are pinned to exact Node 24 commit SHAs.
+Configuring a required branch check remains a separate repository admin action;
 authenticated OMP and real Telegram acceptance stay manual.
 
 See [live feasibility and acceptance evidence](docs/verification/spikes.md) and the [bounded execution plan](docs/verification/execution-plan.md).

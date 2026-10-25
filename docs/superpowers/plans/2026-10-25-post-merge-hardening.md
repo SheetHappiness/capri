@@ -8,7 +8,7 @@
 
 **Tech Stack:** Windows x64, Python 3.14, aiogram 3.31.0, official omp-rpc SDK.
 
-**Spec:** User attachment `C:/Users/shtvl/.codex/attachments/642f91e9-5f86-42e9-966d-5b342565050c/Pasted text.txt`, supplied 2026-10-25.
+**Spec:** User attachment `Pasted text.txt` (post-merge hardening request), supplied 2026-10-25.
 
 ## Global constraints
 
@@ -81,7 +81,8 @@
 
 - [x] Define minimal read-only workflow permissions; checkout, set up Python 3.14, install reproducible dependencies, run `python -m pytest -q` and `git diff --check`. Explicitly propagate failures of both commands on PowerShell.
 - [x] Verify installation and tests in a fresh local environment without binary/auth/token requirements.
-- [ ] Validate workflow syntax (done locally). When publication is authorized, inspect a real Actions run; configure the stable check as required only with repository-administration authorization. Until then record both remote acceptance items as pending.
+- [x] Validate workflow syntax and inspect a real Actions run: run 40225164561 succeeded on main at `f442c4c`.
+- [ ] Configure the stable check as required only with repository-administration authorization; this remains a separate admin acceptance item.
 
 ### Task 5: Remove only invocation mentions
 
@@ -115,3 +116,6 @@
 ## Execution handoff
 
 Implementation proceeded against fetched `origin/main` in the allowed original checkout after the native worktree denied writes. Correctness review found and fixed repeated-cancellation cleanup races before cleanup work. Recommended method: inline implementation with the correctness/safety review after task 2. Approved by the user with four incorporated clarifications on 2026-10-25; execute inline. Commit, push, live Telegram acceptance and repository branch protection changes are separate publication/acceptance decisions.
+
+Integration completed: `f442c4c` was committed, merged into main and pushed.
+[Remote Windows run 40225164561](https://github.com/SheetHappiness/capri/actions/runs/40225164561) succeeded.
