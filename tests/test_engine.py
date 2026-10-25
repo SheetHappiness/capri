@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace as NS
 import pytest
-from capri.engine import Engine, EngineError
+from capri.engine import Engine, EngineError, SteerResult
 
 
 @pytest.mark.parametrize('activity', ['model', 'tool'])
@@ -25,7 +25,7 @@ def test_steer_during_active_run_does_not_wait_for_prompt_lock(tmp_path, activit
         async def consume(): return [part async for part in e.stream(activity)]
         task=asyncio.create_task(consume())
         await asyncio.to_thread(e.client.ready.wait, 1)
-        assert await asyncio.wait_for(e.steer('clarification'), 1)
+        assert await asyncio.wait_for(e.steer('clarification'), 1) is SteerResult.ACCEPTED
         assert await task == (['Working. '] if activity == 'model' else []) + ['Hello ', 'owner']
         assert len(e.client.messages)==1 and 'clarification' in e.client.steers[0]
         await e.close()
@@ -35,7 +35,9 @@ def test_steer_during_active_run_does_not_wait_for_prompt_lock(tmp_path, activit
 def test_missing_sdk_steer_is_safe(tmp_path):
     async def run():
         e=Engine(tmp_path/'omp.exe',tmp_path,sdk_factory=SDK); await e.start()
-        assert await e.steer('later') is False
+        e._active = True
+        assert await e.steer('later') is SteerResult.UNSUPPORTED
+        e._active = False
         assert not e.client.messages and not e.client.stopped
         await e.close()
     asyncio.run(run())
@@ -165,4 +167,46 @@ def test_start_appends_conversation_prompt_on_resume(tmp_path):
         assert all(kw[key] for key in ('no_skills', 'no_rules', 'no_title', 'no_ui'))
         assert 'system_prompt' not in kw
         await resumed.close()
+    asyncio.run(run())
+
+
+def test_steer_result_distinguishes_inactive_from_unsupported(tmp_path):
+    async def run():
+        from capri.engine import SteerResult
+        e = Engine(tmp_path / 'omp.exe', tmp_path, sdk_factory=SDK)
+        await e.start()
+        try:
+            assert await e.steer('inactive') is SteerResult.NOT_ACTIVE
+            e._active = True
+            assert await e.steer('unsupported') is SteerResult.UNSUPPORTED
+        finally:
+            e._active = False
+            await e.close()
+    asyncio.run(run())
+
+
+def test_steer_explicit_unsupported_and_uncertain_ack(tmp_path):
+    from omp_rpc import RpcError
+
+    class SteeringSDK(SDK):
+        error = None
+
+        def steer(self, message):
+            raise self.error
+
+    async def run():
+        from capri.engine import SteerResult
+        e = Engine(tmp_path / 'omp.exe', tmp_path, sdk_factory=SteeringSDK)
+        await e.start()
+        e._active = True
+        try:
+            for message in ('unknown command: steer', 'steer not supported'):
+                e.client.error = RpcError(message)
+                assert await e.steer('input') is SteerResult.UNSUPPORTED
+            e.client.error = RuntimeError('lost ACK')
+            with pytest.raises(EngineError, match='uncertain'):
+                await e.steer('input')
+        finally:
+            e._active = False
+            await e.close()
     asyncio.run(run())

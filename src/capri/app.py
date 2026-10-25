@@ -6,7 +6,7 @@ from collections import deque
 from contextlib import suppress
 from aiogram import Bot, Dispatcher, F, Router
 from .config import Pairing
-from .engine import Engine
+from .engine import Engine, SteerResult
 from .telegram import deliver
 
 
@@ -42,7 +42,7 @@ class InboundFlow:
             batch = list(self.pending)
             self.submitting = True
             try:
-                accepted = await self.engine.steer('\n\n'.join(text for _, text in batch))
+                result = await self.engine.steer('\n\n'.join(text for _, text in batch))
             except Exception:
                 # An uncertain ACK must not be retried as a new prompt.
                 for _ in batch:
@@ -53,11 +53,14 @@ class InboundFlow:
                 return
             finally:
                 self.submitting = False
-            if accepted:
+            if result is SteerResult.ACCEPTED:
                 for _ in batch:
                     self.pending.popleft()
             else:
-                self.steer_available = False
+                if result is SteerResult.UNSUPPORTED:
+                    self.steer_available = False
+                # A finished turn leaves the batch for the normal FIFO drain.
+                return
 
     async def _drain(self):
         while self.pending:
@@ -77,17 +80,16 @@ class InboundFlow:
             await self.worker
 
     async def stop(self):
-        if self.burst is not None:
-            if not self.submitting:
-                self.burst.cancel()
-            with suppress(asyncio.CancelledError):
-                await self.burst
-            self.burst = None
         self.pending.clear()
-        if self.worker is not None and not self.worker.done():
-            self.worker.cancel()
+        # Cancel both before joining either: a steer ACK must never delay abort.
+        tasks = [task for task in (self.burst, self.worker) if task is not None]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        for task in tasks:
             with suppress(asyncio.CancelledError):
-                await self.worker
+                await task
+        self.burst = None
 
 
 async def handle_text(message, bot, engine, pairing, lock):
