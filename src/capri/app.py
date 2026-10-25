@@ -13,6 +13,7 @@ from .guest import GuestService
 from .guest_engine import GuestEngine
 from .guest_threads import GuestThreadStore, ThreadError
 from .engine import EngineError
+from .teardown import join_cleanup, stop_child
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class OmpRuntime:
         self.safe = True
 
     def _check(self):
-        if not self.safe or not self.guest.safe:
+        if not self.safe or not self.guest.safe or not getattr(self.owner, 'safe', True):
             raise EngineError('OMP teardown unconfirmed; restart Capri')
 
     async def stream(self, text):
@@ -38,13 +39,15 @@ class OmpRuntime:
                     await asyncio.shield(start)
                 except asyncio.CancelledError:
                     try:
-                        await start
+                        await join_cleanup(start)
                     except Exception:
                         pass
                     finally:
                         if self.owner.client is not None:
+                            self.safe = False
                             try:
-                                self.safe = await asyncio.to_thread(self.owner.client.stop) is True
+                                stop = asyncio.create_task(asyncio.to_thread(stop_child, self.owner.client))
+                                self.safe = await join_cleanup(stop)
                             except Exception:
                                 self.safe = False
                             if self.safe: self.owner.client = None
@@ -65,12 +68,13 @@ class OmpRuntime:
         async with self.lock:
             self._check()
             if self.owner_ready:
-                stop = asyncio.create_task(asyncio.to_thread(self.owner.client.stop))
+                self.safe = False
+                stop = asyncio.create_task(asyncio.to_thread(stop_child, self.owner.client))
                 try:
                     self.safe = await asyncio.shield(stop)
                 except asyncio.CancelledError:
                     try:
-                        self.safe = await stop
+                        self.safe = await join_cleanup(stop)
                     except Exception:
                         self.safe = False
                     finally:

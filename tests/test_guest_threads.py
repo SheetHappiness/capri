@@ -42,3 +42,26 @@ def test_malformed_store_fails_closed(tmp_path, raw):
     path = tmp_path/'guest/threads.json'; path.parent.mkdir(); path.write_text(raw)
     with pytest.raises(ThreadError): GuestThreadStore(tmp_path)
     assert path.read_text() == raw
+
+
+
+@pytest.mark.parametrize('title,want', [
+    ('x'*150,'x'*100), ('  first\nsecond\tthird  ','first second third'),
+    (' \n\t ',None), ('🙂'*120,'🙂'*100), (' Україна 日本語 ','Україна 日本語'),
+])
+def test_new_thread_title_normalization_persists(tmp_path,title,want):
+    store=GuestThreadStore(tmp_path)
+    thread=store.new(7,title)
+    assert thread.title==want
+    assert GuestThreadStore(tmp_path).current(7).title==want
+
+
+def test_rename_normalizes_and_rejects_empty_without_mutation(tmp_path):
+    store=GuestThreadStore(tmp_path)
+    thread=store.new(7,'Original')
+    before=store.path.read_bytes()
+    with pytest.raises(ThreadError): store.rename_current(7,' \n\t ')
+    assert store.current(7)==thread and store.path.read_bytes()==before
+    renamed=store.rename_current(7,'  '+('🙂'*120)+'\nignored')
+    assert renamed.title=='🙂'*100
+    assert GuestThreadStore(tmp_path).current(7).title=='🙂'*100

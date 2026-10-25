@@ -1,24 +1,43 @@
 """Owner-only guest turns and local chat-scoped thread commands."""
 import asyncio
+from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum, auto
 import logging
 import re
-from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
+from aiogram.exceptions import (TelegramBadRequest, TelegramForbiddenError,
+                                TelegramNotFound, TelegramRetryAfter, TelegramUnauthorizedError)
 from aiogram.types import InlineQueryResultArticle, InputTextMessageContent
 from .guest_progress import ProgressView
-from .guest_threads import ThreadError
+from .guest_threads import ThreadError, normalize_title
 from .telegram import _fit, _ERROR
 
 log = logging.getLogger(__name__)
 
 
+class EditResult(Enum):
+    ACKED = auto()
+    RETRY_AFTER = auto()
+    FAILED = auto()
+    UNCERTAIN = auto()
+
+
+@dataclass(frozen=True)
+class EditOutcome:
+    result: EditResult
+    delay: float = 0
+
+
 class GuestService:
     def __init__(self, bot, owner_id, username, store, runtime, *, interval=0.9, timeout=210, startup_delay=1.2):
         self.bot, self.owner_id, self.store, self.runtime = bot, owner_id, store, runtime
-        self.mention = re.compile(r'(?<!\w)@' + re.escape(username) + r'(?!\w)', re.I)
+        self.username = '@' + username.casefold()
+        self.mention = re.compile(r'^\s*@' + re.escape(username) + r'(?!\w)', re.I)
         self.interval, self.timeout = interval, timeout
         self.startup_delay = startup_delay
         self.seen = set()
+        self.seen_order = deque(maxlen=2048)
         self.busy = False
         self.tasks = set()
 
@@ -35,21 +54,30 @@ class GuestService:
             log.warning('guest: answer_failed (no retry)')
             return None
 
-    async def _edit(self, inline_id, text):
+    async def _edit(self, inline_id, text) -> EditOutcome:
         try:
             await self.bot.edit_message_text(inline_message_id=inline_id, text=_fit(text), parse_mode=None)
             log.info('guest: edit_ack')
+            return EditOutcome(EditResult.ACKED)
         except TelegramRetryAfter as exc:
             log.warning('guest: edit_rate_limited')
-            return max(0,exc.retry_after)
-        except TelegramAPIError:
+            return EditOutcome(EditResult.RETRY_AFTER, max(0,exc.retry_after))
+        except (TelegramBadRequest, TelegramForbiddenError, TelegramNotFound, TelegramUnauthorizedError):
             log.warning('guest: edit_failed')
+            return EditOutcome(EditResult.FAILED)
+        except Exception:
+            # A network/server/unknown error does not prove Telegram rejected it.
+            log.warning('guest: delivery_uncertain')
+            return EditOutcome(EditResult.UNCERTAIN)
 
     def _listing(self, chat):
         threads = self.store.list(chat)
         if not threads: return 'Немає threads у цьому чаті. /newthread [назва]'
-        return '\n'.join(f'{"*" if i == 0 else " "} {t.id} – {t.title or "Без назви"}'
-                         for i,t in enumerate(threads))
+        listing = '\n'.join(f'{"*" if i == 0 else " "} {t.id} – {normalize_title(t.title) or "Без назви"}'
+                            for i,t in enumerate(threads[:20]))
+        if len(threads) > 20:
+            listing += f'\nЩе threads: {len(threads)-20}. /resume <ID або назва>'
+        return _fit(listing)
 
     def _command(self, chat, text):
         parts = text.split(maxsplit=1)
@@ -61,7 +89,7 @@ class GuestService:
             t = self.store.current(chat)
             if t is None: return 'Немає поточного thread. /newthread [назва]'
             def date(value): return datetime.fromtimestamp(value,timezone.utc).isoformat(timespec='seconds')
-            return f'Thread: {t.id}\nTitle: {t.title or "Без назви"}\nCreated: {date(t.created_at)}\nLast active: {date(t.updated_at)}'
+            return f'Thread: {t.id}\nTitle: {normalize_title(t.title) or "Без назви"}\nCreated: {date(t.created_at)}\nLast active: {date(t.updated_at)}'
         if name not in ('/newthread','/new','/resume','/title'):
             return 'Команди: /newthread [назва], /threads, /resume <ID або назва>, /title <назва>, /status'
         if self.busy: return 'Зачекай завершення поточної відповіді.'
@@ -69,7 +97,7 @@ class GuestService:
         elif name == '/resume': t = self.store.resume(chat,arg)
         elif not arg: return 'Вкажи назву: /title <назва>'
         else: t = self.store.rename_current(chat,arg)
-        return f'Thread: {t.id} – {t.title or "Без назви"}'
+        return f'Thread: {t.id} – {normalize_title(t.title) or "Без назви"}'
 
     async def handle(self, message):
         sender = message.from_user
@@ -78,7 +106,10 @@ class GuestService:
             return
         query_id = message.guest_query_id
         if query_id in self.seen: return
+        if len(self.seen_order) == self.seen_order.maxlen:
+            self.seen.remove(self.seen_order.popleft())
         self.seen.add(query_id)  # Reserve before any network await.
+        self.seen_order.append(query_id)
         task = asyncio.current_task()
         self.tasks.add(task)
         try:
@@ -88,9 +119,30 @@ class GuestService:
         finally:
             self.tasks.discard(task)
 
+    def _input_text(self, message) -> str:
+        if message.text is not None:
+            text, entities = message.text, message.entities
+        else:
+            text, entities = message.caption or '', message.caption_entities
+        encoded = text.encode('utf-16-le')
+        for entity in entities or ():
+            if entity.type != 'mention':
+                continue
+            start, end = entity.offset * 2, (entity.offset + entity.length) * 2
+            if not 0 <= start < end <= len(encoded):
+                continue
+            try:
+                mention = encoded[start:end].decode('utf-16-le')
+            except UnicodeDecodeError:
+                continue
+            if mention.casefold() == self.username:
+                return (encoded[:start] + encoded[end:]).decode('utf-16-le').strip()
+        # Without a matching entity only a leading invocation is unambiguous.
+        return self.mention.sub('', text, count=1).strip()
+
     async def _handle_owner(self, message):
         query_id, chat = message.guest_query_id, message.chat.id
-        text = self.mention.sub('',message.text or message.caption or '').strip()
+        text = self._input_text(message)
         try:
             command = self._command(chat,text)
         except ThreadError as exc:
@@ -122,16 +174,24 @@ class GuestService:
             if not attempted:
                 attempted = True
                 inline_id = await self._answer(query_id,text)
+                acknowledged = bool(inline_id)
             elif inline_id:
-                retry_after = await self._edit(inline_id,text)
-                if retry_after is not None:
-                    next_send = loop.time() + max(self.interval,retry_after)
+                outcome = await self._edit(inline_id,text)
+                if outcome.result is EditResult.RETRY_AFTER:
+                    next_send = loop.time() + max(self.interval,outcome.delay)
                     if not final: return True
-                    # Edits are idempotent; retry a final once after explicit 429.
-                    # An uncertain answerGuestQuery is never retried.
+                    # Only explicit rejection authorizes one final retry.
                     await asyncio.sleep(max(0,next_send-loop.time()))
-                    await self._edit(inline_id,text)
+                    outcome = await self._edit(inline_id,text)
+                acknowledged = outcome.result is EditResult.ACKED
+            else:
+                acknowledged = False
             next_send = loop.time() + self.interval
+            if final:
+                log.log(logging.INFO if acknowledged else logging.WARNING,
+                        'guest: final_ack' if acknowledged else 'guest: final_failed')
+                return acknowledged
+            # Failed progress is not a failed model turn: still attempt its final.
             return bool(inline_id)
 
         try:
@@ -175,7 +235,8 @@ class GuestService:
                         pass
                 if reader.done(): reader.result()
             final = view.final_text if view.completed else ''
-            await publish(final or 'Модель не повернула текстової відповіді.', final=True)
+            if not await publish(final or 'Модель не повернула текстової відповіді.', final=True):
+                return
             try:
                 self.store.touch(chat)
             except (ThreadError,OSError):

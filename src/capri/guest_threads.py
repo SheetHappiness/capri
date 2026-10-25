@@ -13,6 +13,14 @@ class ThreadError(ValueError):
     pass
 
 
+def normalize_title(title: str | None) -> str | None:
+    if title is None:
+        return None
+    if not isinstance(title, str):
+        raise ThreadError('Invalid guest title')
+    return ' '.join(title.split())[:100].strip() or None
+
+
 @dataclass(frozen=True)
 class GuestThread:
     id: str
@@ -67,7 +75,7 @@ class GuestThreadStore:
 
     def new(self, chat_id: int, title: str | None = None) -> GuestThread:
         now = time.time()
-        thread = GuestThread(secrets.token_hex(6), chat_id, title, now, now)
+        thread = GuestThread(secrets.token_hex(6), chat_id, normalize_title(title), now, now)
         self._validate(thread)
         self._threads[thread.id] = thread
         self._current[chat_id] = thread.id
@@ -93,6 +101,8 @@ class GuestThreadStore:
     def rename_current(self, chat_id: int, title: str) -> GuestThread:
         thread = self.current(chat_id)
         if thread is None: raise ThreadError('Немає поточного thread. Скористайся /newthread.')
+        title = normalize_title(title)
+        if title is None: raise ThreadError('Вкажи назву: /title <назва>')
         updated = replace(thread, title=title, updated_at=time.time())
         self._threads[thread.id] = updated
         self._save()

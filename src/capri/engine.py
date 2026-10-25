@@ -6,6 +6,7 @@ from enum import Enum, auto
 from omp_rpc import RpcClient
 from .config import OMP_CONFIG, write_json
 from .prompt import CAPRI_CONVERSATION_PROMPT
+from .teardown import complete_cleanup, stop_child
 
 
 class SteerResult(Enum):
@@ -24,6 +25,7 @@ class Engine:
         self.data = data.resolve()
         self.sdk_factory = sdk_factory
         self.client = None
+        self.safe = True
         self._lock = asyncio.Lock()
         self._queue = None
         self._loop = None
@@ -33,6 +35,8 @@ class Engine:
         self._steer_lock = asyncio.Lock()
 
     async def start(self):
+        if not self.safe:
+            raise EngineError('OMP teardown unconfirmed; restart Capri')
         agent = self.data / 'agent'
         work = self.data / 'work'
         sessions = agent / 'sessions'
@@ -96,7 +100,8 @@ class Engine:
                         raise EngineError('OMP did not complete the response')
                 except Exception:
                     self._failed = True
-                    await asyncio.to_thread(self.client.stop)
+                    self.safe = False
+                    self.safe = await asyncio.to_thread(stop_child, self.client)
                     queue.put_nowait(EngineError('OMP response failed or process exited; restart Capri'))
                 finally:
                     self._active = False
@@ -114,12 +119,16 @@ class Engine:
             finally:
                 self._queue = None
                 if not task.done():
-                    try:
-                        self._aborting = True
-                        await asyncio.to_thread(self.client.abort)
-                    finally:
-                        await task
-                        self._aborting = False
+                    async def cleanup():
+                        try:
+                            self._aborting = True
+                            await asyncio.to_thread(self.client.abort)
+                        finally:
+                            try:
+                                await task
+                            finally:
+                                self._aborting = False
+                    await complete_cleanup(cleanup())
 
     async def steer(self, text: str) -> SteerResult:
         """Use the SDK's concurrent command path, never the prompt lifecycle lock.
@@ -146,4 +155,7 @@ class Engine:
 
     async def close(self):
         if self.client is not None:
-            await asyncio.to_thread(self.client.stop)
+            self.safe = False
+            async def cleanup():
+                self.safe = await asyncio.to_thread(stop_child, self.client)
+            await complete_cleanup(cleanup())

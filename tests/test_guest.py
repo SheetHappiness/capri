@@ -13,13 +13,17 @@ from test_guest_probe import message
 
 class Transport(Bot):
     def __init__(self):
-        super().__init__('123:TEST'); self.calls=[]; self.fail_answer=False; self.fail_edit=False
+        super().__init__('123:TEST'); self.calls=[]; self.acknowledged=[]; self.edit_errors=[]; self.fail_answer=False; self.fail_edit=False
     async def __call__(self,method,**kw):
         assert isinstance(method,(AnswerGuestQuery,EditMessageText)), 'no ordinary messages'
         self.calls.append(method)
         if ((isinstance(method,AnswerGuestQuery) and self.fail_answer)
                 or (isinstance(method,EditMessageText) and self.fail_edit)):
             raise TelegramNetworkError(method=method,message='PRIVATE SECRET')
+        if isinstance(method,EditMessageText) and self.edit_errors:
+            error=self.edit_errors.pop(0)
+            if error is not None: raise error(method)
+        self.acknowledged.append(method)
         return SentGuestMessage(inline_message_id='inline-1') if isinstance(method,AnswerGuestQuery) else True
 
 
@@ -172,5 +176,183 @@ def test_unexpected_answer_failure_is_never_retried(tmp_path):
         try:
             await service.handle(message())
             assert len(attempts)==1 and runtime.closed and not service.busy
+        finally: await bot.session.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('outcome', ['ack', 'rate_then_ack', 'rate_twice', 'rejected', 'uncertain', 'unknown'])
+def test_final_delivery_requires_ack(tmp_path, caplog, outcome):
+    from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+    async def run():
+        bot,runtime,store,service=setup(tmp_path)
+        rate=lambda m: TelegramRetryAfter(method=m,message='Flood',retry_after=0)
+        errors={
+            'ack': [], 'rate_then_ack': [rate], 'rate_twice': [rate,rate],
+            'rejected': [lambda m: TelegramBadRequest(method=m,message='rejected')],
+            'uncertain': [lambda m: TelegramNetworkError(method=m,message='PRIVATE SECRET')],
+            'unknown': [lambda m: RuntimeError('PRIVATE SECRET')],
+        }
+        bot.edit_errors=errors[outcome]
+        touches=[]
+        store.touch=lambda chat: touches.append(chat)
+        try:
+            await service.handle(message())
+            attempts=[c for c in bot.calls if isinstance(c,EditMessageText)]
+            acked=[c.text for c in bot.acknowledged if isinstance(c,EditMessageText)]
+            assert len(attempts)==(2 if outcome.startswith('rate_') else 1)
+            assert acked==(['Hello\n\nworld'] if outcome in ('ack','rate_then_ack') else [])
+            assert len([c for c in bot.calls if isinstance(c,AnswerGuestQuery)])==1
+            assert touches==([7] if acked else [])
+            if acked:
+                assert 'guest: final_ack' in caplog.text
+            else:
+                assert ('guest: delivery_uncertain' if outcome in ('uncertain','unknown')
+                        else 'guest: final_failed') in caplog.text
+            assert 'PRIVATE' not in caplog.text
+            assert runtime.closed and not service.busy
+        finally: await bot.session.close()
+    caplog.set_level('INFO',logger='capri.guest')
+    asyncio.run(run())
+
+
+def test_progress_failure_still_delivers_acknowledged_final(tmp_path):
+    async def run():
+        bot,runtime,store,service=setup(tmp_path)
+        service.interval=0.001
+        bot.edit_errors=[lambda m: TelegramNetworkError(method=m,message='PRIVATE')]
+        async def stream(*a,**kw):
+            yield GuestEvent('text','Working')
+            # Wait for one failed progress edit before completing the model turn.
+            while len([c for c in bot.calls if isinstance(c,EditMessageText)])<1:
+                await asyncio.sleep(0)
+            yield GuestEvent('final','Final ACK')
+        runtime.stream_guest=stream
+        try:
+            await asyncio.wait_for(service.handle(message()),1)
+            acked=[c.text for c in bot.acknowledged if isinstance(c,EditMessageText)]
+            assert acked==['Final ACK']
+        finally: await bot.session.close()
+    asyncio.run(run())
+
+
+
+def test_guest_dedupe_is_bounded_and_evicts_oldest(tmp_path):
+    async def run():
+        bot,runtime,store,service=setup(tmp_path)
+        try:
+            for i in range(2049):
+                await service.handle(message(text='/status',guest_query_id=str(i)))
+            assert len(service.seen)==2048
+            assert len(service.seen_order)==2048
+            assert '0' not in service.seen and '1' in service.seen
+            count=len(bot.calls)
+            await service.handle(message(text='/status',guest_query_id='1'))
+            assert len(bot.calls)==count
+            await service.handle(message(text='/status',guest_query_id='0'))
+            assert len(bot.calls)==count+1
+            assert '1' not in service.seen and len(service.seen)==2048
+        finally: await bot.session.close()
+    asyncio.run(run())
+
+
+def test_uncertain_answer_is_reserved_before_network_await(tmp_path):
+    async def run():
+        bot,runtime,store,service=setup(tmp_path)
+        entered=asyncio.Event(); release=asyncio.Event(); attempts=[]
+        async def answer(**kw):
+            attempts.append(kw); entered.set(); await release.wait()
+            raise RuntimeError('lost ACK')
+        bot.answer_guest_query=answer
+        task=asyncio.create_task(service.handle(message(text='/status')))
+        try:
+            await entered.wait()
+            await service.handle(message(text='/status'))
+            release.set(); await task
+            await service.handle(message(text='/status'))
+            assert len(attempts)==1
+        finally: release.set(); await task; await bot.session.close()
+    asyncio.run(run())
+
+
+
+@pytest.mark.parametrize('text,entities,want', [
+    ('@Capriompbot hello',[{'type':'mention','offset':0,'length':12}],'hello'),
+    ('Привіт @Capriompbot знайди X',[{'type':'mention','offset':7,'length':12}],'Привіт  знайди X'),
+    ('🙂 @cAPRIompBOT hello',[{'type':'mention','offset':3,'length':12}],'🙂  hello'),
+    ('@Other @Capriompbot @Capriompbot',[
+        {'type':'mention','offset':0,'length':6},
+        {'type':'mention','offset':7,'length':12},
+        {'type':'mention','offset':20,'length':12}],'@Other  @Capriompbot'),
+    ('@Capriompbot hello @Capriompbot',None,'hello @Capriompbot'),
+    ('  @CAPRIOMPBOT hello',None,'hello'),
+    ('Скажи, що означає @Capriompbot',None,'Скажи, що означає @Capriompbot'),
+    ('"@Capriompbot" це цитата',None,'"@Capriompbot" це цитата'),
+    ('@CapriompbotExtra hello',[{'type':'mention','offset':0,'length':17}],'@CapriompbotExtra hello'),
+    ('@Capriompbot_extra hello',None,'@Capriompbot_extra hello'),
+])
+def test_only_first_invocation_mention_removed(tmp_path,text,entities,want):
+    async def run():
+        bot,runtime,store,service=setup(tmp_path)
+        try:
+            await service.handle(message(text=text,entities=entities))
+            assert runtime.calls[0][1]['text']==want
+        finally: await bot.session.close()
+    asyncio.run(run())
+
+
+def test_caption_uses_caption_mention_entities(tmp_path):
+    async def run():
+        bot,runtime,store,service=setup(tmp_path)
+        try:
+            await service.handle(message(text=None,caption='🙂 @Capriompbot check @Capriompbot',
+                caption_entities=[{'type':'mention','offset':3,'length':12},
+                                  {'type':'mention','offset':22,'length':12}]))
+            assert runtime.calls[0][1]['text']=='🙂  check @Capriompbot'
+        finally: await bot.session.close()
+    asyncio.run(run())
+
+
+
+@pytest.mark.parametrize('title',['short','🙂'*100])
+def test_thread_listing_is_bounded_without_deleting_sessions(tmp_path,title):
+    async def run():
+        import re
+        bot,runtime,store,service=setup(tmp_path)
+        threads=[store.new(7,title) for _ in range(25)]
+        directory=store.session_dir(threads[0]); directory.mkdir(parents=True)
+        session=directory/'keep.jsonl'; session.write_text('keep')
+        try:
+            listing=service._command(7,'/threads')
+            assert len(listing.encode('utf-16-le'))//2<=4096
+            ids=re.findall(r'[0-9a-f]{12} –',listing)
+            assert len(ids)<=20
+            if title=='short': assert len(ids)==20 and '5' in listing
+            assert listing.startswith('* '+threads[-1].id)
+            await service.handle(message(text='/threads'))
+            delivered=bot.acknowledged[-1].result.input_message_content.message_text
+            assert delivered==listing
+            assert len(store.list(7))==25 and session.read_text()=='keep'
+        finally: await bot.session.close()
+    asyncio.run(run())
+
+
+def test_legacy_titles_are_bounded_for_display_without_rewriting_store(tmp_path):
+    async def run():
+        import json
+        bot,runtime,store,service=setup(tmp_path)
+        thread=store.new(7,'Old')
+        raw=json.loads(store.path.read_text(encoding='utf-8'))
+        legacy='🙂'*3000+'\nold second line'
+        raw['threads'][0]['title']=legacy
+        store.path.write_text(json.dumps(raw),encoding='utf-8')
+        service.store=GuestThreadStore(tmp_path)
+        before=store.path.read_bytes()
+        try:
+            listing=service._command(7,'/threads')
+            assert listing=='* '+thread.id+' – '+'🙂'*100
+            status=service._command(7,'/status')
+            assert 'Title: '+'🙂'*100+'\nCreated:' in status
+            assert store.path.read_bytes()==before
+            assert service.store.resume(7,legacy).id==thread.id
         finally: await bot.session.close()
     asyncio.run(run())

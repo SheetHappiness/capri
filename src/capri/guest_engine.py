@@ -9,6 +9,7 @@ import threading
 from omp_rpc import RpcClient, assistant_text
 from .engine import EngineError
 from .prompt import CAPRI_GUEST_PROMPT
+from .teardown import complete_cleanup, stop_child
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class GuestEngine:
 
         def stop():
             with stop_lock:
-                return client.stop()
+                return stop_child(client)
 
         def update(event):
             item = event.assistant_message_event
@@ -112,7 +113,7 @@ class GuestEngine:
                 loop.call_soon_threadsafe(queue.put_nowait, EngineError('Guest OMP response failed'))
             finally:
                 try:
-                    self.safe = stop() is True
+                    self.safe = stop()
                 except Exception:
                     self.safe = False
                 if not self.safe:
@@ -120,6 +121,7 @@ class GuestEngine:
                     loop.call_soon_threadsafe(queue.put_nowait, EngineError('Guest child teardown unconfirmed'))
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
+        self.safe = False
         task = asyncio.create_task(asyncio.to_thread(run))
         try:
             while True:
@@ -129,11 +131,10 @@ class GuestEngine:
                 yield item
         finally:
             cancelled.set()
-            if not task.done():
-                # Interrupt a synchronous SDK wait, then join its real worker.
-                # Cancelling asyncio.to_thread alone would leave the child alive.
-                try:
+            async def cleanup():
+                if not task.done():
+                    # Interrupt the wait, then join the real worker. Protect both
+                    # operations against repeated cancellation before unlocking.
                     await asyncio.to_thread(stop)
-                except Exception:
-                    pass
-            await asyncio.shield(task)
+                await task
+            await complete_cleanup(cleanup())

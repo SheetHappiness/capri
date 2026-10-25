@@ -6,7 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "capri"
 version = "0.0.1"
 requires-python = ">=3.14,<3.15"
-dependencies = ["aiogram==3.31.0", "omp-rpc==0.1.0"]
+dependencies = [
+    "aiogram==3.31.0",
+    "omp-rpc @ https://codeload.github.com/can1357/oh-my-pi/zip/45c35e40c46166dc726ccc52f5d27f40f2449f99#sha256=a8bbb85ede151ed58c100e84e6d239ca835937e04a51cd287049a9ff737fd4e2&subdirectory=sdk/python/omp-rpc",
+]
 
 [project.scripts]
 capri = "capri.cli:main"

@@ -1,5 +1,9 @@
 # Capri Guest live progress — verification (2026-10-25)
 
+Subsequent ACK, teardown, dedupe, mention and metadata hardening is recorded in
+[post-merge hardening](post-merge-hardening.md). Earlier evidence below is historical;
+it does not imply deployment or live acceptance of those later changes.
+
 Implemented locally, no commit/push. Production Capri restarted at17:58:53 Europe/Warsaw with supports_guest_queries=True; one combined DM/Guest poller is running.
 
 ## Behavior
@@ -10,6 +14,8 @@ Implemented locally, no commit/push. Production Capri restarted at17:58:53 Europ
 - Native assistant message snapshots and tool boundaries distinguish current/interim text. Individual OMP turn_end can be a tool-bearing step; the prompt's own completed result supplies an independent final.
 - Final replaces all progress, including when final text differs from the streamed preview. Completed length-limited assistant text is preserved; toolUse/error/aborted tails are excluded.
 - Answer and edits use one0.9s pacing path, including final. Progress FloodWait respects backoff; final retries an explicit429 once on the same inline id. Unknown answer acknowledgement is never retried.
+- After hardening, final success requires ACK. Generic network/server/unknown edit
+  outcomes are uncertain and never retried blindly; failed progress can still reach final.
 - Final is published before process teardown; shared runtime lock remains held until cleanup, and unconfirmed child teardown still blocks future OMP children.
 - UTF-16 budget includes the spinner and visible truncation. No ordinary sendMessage or DM fallback.
 - DM engine, bubble flow, steering and delivery are unchanged by this refinement.

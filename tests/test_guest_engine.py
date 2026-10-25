@@ -50,6 +50,22 @@ class GuestSDK(SDK):
         return turn
 
 
+@pytest.mark.parametrize('outcome',[False,None,'raise'])
+def test_guest_unconfirmed_stop_blocks_next_child(tmp_path,outcome):
+    class Unsafe(GuestSDK):
+        def stop(self):
+            if outcome=='raise': raise OSError('PRIVATE')
+            return outcome
+    async def run():
+        e=GuestEngine(tmp_path/'omp.exe',tmp_path,sdk_factory=Unsafe)
+        directory=tmp_path/'guest/sessions/1'/('f'*12)
+        for _ in range(2):
+            with pytest.raises(EngineError):
+                _=[x async for x in e.stream(directory,text='hi',reference_text=None)]
+        assert not e.safe
+    asyncio.run(run())
+
+
 def test_guest_resume_isolation_and_public_text(tmp_path):
     async def run():
         owner = tmp_path/'session.json'; owner.write_text('private pointer')
@@ -176,4 +192,35 @@ def test_completed_length_keeps_text_but_tool_tail_is_not_final(tmp_path,reason,
         engine=GuestEngine(tmp_path/'omp.exe',tmp_path,sdk_factory=Ending)
         parts=[x async for x in engine.stream(tmp_path/'guest/sessions/1'/('e'*12),text='hi',reference_text=None)]
         assert [(e.kind,e.text) for e in parts]==[('final',want)]
+    asyncio.run(run())
+
+
+
+def test_repeated_cancel_still_joins_guest_worker(tmp_path):
+    import threading
+    class Blocked(GuestSDK):
+        def __init__(self,**kw):
+            super().__init__(**kw)
+            self.ready=threading.Event(); self.stopping=threading.Event()
+            self.release=threading.Event(); self.done=threading.Event()
+        def prompt_and_wait(self,*a,**kw):
+            self.ready.set(); self.done.wait(3); raise RuntimeError('stopped')
+        def stop(self):
+            self.stopping.set(); self.release.wait(3); self.done.set()
+            return super().stop()
+    async def run():
+        e=GuestEngine(tmp_path/'omp.exe',tmp_path,sdk_factory=Blocked)
+        async def consume():
+            return [x async for x in e.stream(tmp_path/'guest/sessions/1'/('f'*12),text='hi',reference_text=None)]
+        task=asyncio.create_task(consume())
+        while not GuestSDK.instances or not isinstance(GuestSDK.instances[-1],Blocked): await asyncio.sleep(0)
+        sdk=GuestSDK.instances[-1]
+        assert await asyncio.to_thread(sdk.ready.wait,1)
+        task.cancel()
+        assert await asyncio.to_thread(sdk.stopping.wait,1)
+        task.cancel(); await asyncio.sleep(0.01)
+        try: assert not task.done(), 'cancellation abandoned live child cleanup'
+        finally: sdk.release.set()
+        with pytest.raises(asyncio.CancelledError): await task
+        assert sdk.done.is_set() and sdk.stopped
     asyncio.run(run())

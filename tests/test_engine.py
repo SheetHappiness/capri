@@ -83,6 +83,17 @@ class SDK:
     def abort(self): pass
     def stop(self): self.stopped=True; return True
 
+
+def test_owner_unconfirmed_close_blocks_restart(tmp_path):
+    class Unsafe(SDK):
+        def stop(self): return False
+    async def run():
+        e=Engine(tmp_path/'omp.exe',tmp_path,sdk_factory=Unsafe)
+        await e.start()
+        await e.close()
+        with pytest.raises(EngineError): await e.start()
+    asyncio.run(run())
+
 def test_public_stream_and_literal_input(tmp_path):
     async def run():
         e=Engine(tmp_path/'omp.exe',tmp_path,sdk_factory=SDK)

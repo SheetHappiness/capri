@@ -1,5 +1,10 @@
 # Guest Luna threads — verification (2026-10-25)
 
+**Status: SUPERSEDED for Guest delivery UX.** Current behavior:
+[Guest live progress](guest-live-progress.md), with subsequent
+[post-merge hardening](post-merge-hardening.md). This document preserves historical
+thread/isolation acceptance evidence; its older delivery descriptions are not current requirements.
+
 ## Scope and status
 
 Implementation is uncommitted on codex/first-milestone, base 8d6fc6e.

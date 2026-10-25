@@ -61,12 +61,28 @@ Answer and edits share a 0.9-second pacing interval, including the final edit.
 The completed model answer replaces all progress. Reasoning and tool payloads
 are never displayed. No ordinary send or DM fallback.
 Long replies are visibly truncated to 4096 UTF-16 units.
+Final delivery succeeds only after an acknowledged answer/edit. An explicit final
+429 permits one retry after its delay on the same inline message. Generic network,
+server and unknown errors are uncertain: log the outcome and do not retry blindly.
+Failed progress edits can still be followed by the eventual final answer.
+Query IDs are reserved before network work, including failed/uncertain attempts;
+dedupe retains the most recent 2048 IDs. Older IDs can be processed again after eviction.
+
+Only the first Telegram `mention` entity matching the bot username (ignoring case)
+is removed, using its UTF-16 range. Other occurrences are preserved. Without a
+matching entity, only one leading invocation is removed; mentions within content
+or quoted examples stay intact.
 
 Each chat has its own persistent threads under `.runtime/guest/sessions/<chat>/<thread>`.
 There is no automatic expiry. Commands after the mention are local, without Luna:
 `/newthread [title]` (alias `/new`), `/threads`, `/resume [ID/prefix/title]`,
 `/title <name>`, `/status`. Resume without an argument lists threads. Ambiguous
 selectors are rejected. While a guest turn is active, only listing/status is allowed.
+New/renamed titles are normalized to one line, trimmed and capped at 100 Unicode
+code points. An empty new title is unnamed; an empty rename is rejected. Listings
+show at most 20 entries, current first and others most recently active first, and
+pass through the shared 4096-unit UTF-16 limit even for emoji titles. Older entries
+and sessions remain available through `/resume`; legacy titles are bounded for display.
 Reply text/caption is passed as quoted, untrusted reference data; no broader history
 or owner transcript is read. Tools are exactly web_search; model is gpt-6-luna.
 
@@ -77,8 +93,11 @@ The next DM lazily resumes the unchanged owner pointer. This adds startup latenc
 DM messages wait while guest work runs. Unconfirmed child teardown blocks further
 OMP work until restart rather than risking simultaneous children.
 
-Automated and real OMP checks passed; production Telegram scenarios still need
-owner confirmation. See docs/verification/guest-luna-threads.md.
+Current Guest delivery behavior and its live evidence are recorded in
+[Guest live progress](docs/verification/guest-live-progress.md). The earlier
+[Guest threads report](docs/verification/guest-luna-threads.md) retains historical
+thread/isolation evidence. Hardening and remaining acceptance are recorded in
+[post-merge hardening](docs/verification/post-merge-hardening.md).
 
 Stop with Ctrl+C. After an OMP failure/timeout, restart Capri to resume its persisted session.
 Owner messages during a reply are debounced for 500 ms and submitted via native OMP steering.
@@ -105,14 +124,15 @@ messages. Future sticker/PC actions still need a separate ordered tool integrati
 - SHA-256: `73d73c11dc8821cf939441a964992aefc9c5b0d5a4418e9e8985a46439b60eef`.
 - Binary metadata: https://build.stencil.so/api/products/omp/versions/18.12.6/windows-x86_64
 - Official SDK source: `sdk/python/omp-rpc` at that exact commit; SDK version 0.1.0 is NOT sufficient provenance by itself.
+- SDK source archive SHA-256: `a8bbb85ede151ed58c100e84e6d239ca835937e04a51cd287049a9ff737fd4e2`.
+  `pyproject.toml` installs this immutable official archive and verifies its hash.
 - aiogram: 3.31.0. No global OMP or Bun required.
 
-For a new checkout, download and hash-check that binary into `.runtime/omp.exe`, obtain the exact source archive, then:
+For a new checkout, download and hash-check that binary into `.runtime/omp.exe`, then:
 
 ```powershell
 python -m venv .venv
-.venv/Scripts/python -m pip install .runtime/source/oh-my-pi-45c35e40c46166dc726ccc52f5d27f40f2449f99/sdk/python/omp-rpc
-.venv/Scripts/python -m pip install -e . pytest
+.venv/Scripts/python -m pip install -r requirements-test.txt
 ```
 
 Create `.runtime/bot-token` locally, and log in with the official OMP flow using the same private agent directory:
@@ -125,12 +145,28 @@ $env:PI_CODING_AGENT_DIR = (Join-Path (Get-Location) '.runtime/agent')
 ```
 
 This milestone has no npm installer. Never install an unrelated PyPI package in place of the pinned official SDK.
+The pinned SDK's `stop() -> bool` explicitly confirms reaping, including retained
+survivors, only on `True`. Capri shares this strict contract across owner, Guest,
+and runtime handoff through `capri.teardown.stop_child`; exceptions and other return
+values block further children. A cleared SDK process attribute alone proves nothing.
+On Windows the SDK confirms the leader process; POSIX process-group guarantees do
+not apply. Capri retains the existing web-only tool restriction.
 
 ## Verify
 
 ```powershell
 .venv/Scripts/python -m pytest -q
+git diff --check
 ```
+
+`requirements-test.txt` pins application/test package versions for Windows Python
+3.14; the official SDK source/hash is pinned in project metadata. Build backends
+retain their declared version floors. Unit/integration tests require no OMP binary,
+login, bot token or Telegram connectivity.
+The `Tests` workflow runs `Windows Python 3.14` on pull requests and pushes to main.
+Its YAML and install/test commands have been validated locally. A green remote run
+and a required branch check remain pending publication and repository configuration;
+authenticated OMP and real Telegram acceptance stay manual.
 
 See [live feasibility and acceptance evidence](docs/verification/spikes.md) and the [bounded execution plan](docs/verification/execution-plan.md).
 Phase 0/1 is the verified baseline; the narrow Phase 2 conversation-flow spike is implemented locally.

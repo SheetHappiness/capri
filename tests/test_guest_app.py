@@ -33,9 +33,10 @@ def test_serial_child_lifetimes_lazy_owner_resume_and_busy_wait():
     asyncio.run(scenario())
 
 
-def test_unconfirmed_child_teardown_blocks_shared_runtime():
+@pytest.mark.parametrize('result',[False,None,1,'yes'])
+def test_unconfirmed_child_teardown_blocks_shared_runtime(result):
     async def scenario():
-        owner=NS(client=NS(stop=lambda:False),start=AsyncMock())
+        owner=NS(client=NS(stop=lambda:result),start=AsyncMock())
         guest=NS(safe=True,stream=lambda *a,**kw: pytest.fail('guest must not spawn'))
         runtime=OmpRuntime(owner,guest)
         with pytest.raises(EngineError):
@@ -45,7 +46,8 @@ def test_unconfirmed_child_teardown_blocks_shared_runtime():
     asyncio.run(scenario())
 
 
-def test_cancel_during_owner_stop_joins_teardown_before_unlock():
+@pytest.mark.parametrize('cancellations',[1,2])
+def test_cancel_during_owner_stop_joins_teardown_before_unlock(cancellations):
     import threading
     async def scenario():
         entered=threading.Event(); release=threading.Event(); stopped=threading.Event()
@@ -56,15 +58,18 @@ def test_cancel_during_owner_stop_joins_teardown_before_unlock():
         async def consume(): return [x async for x in runtime.stream_guest('thread',text='hi',reference_text=None)]
         task=asyncio.create_task(consume())
         assert await asyncio.to_thread(entered.wait,1)
-        task.cancel(); await asyncio.sleep(0.01)
-        assert runtime.lock.locked()
-        release.set()
+        try:
+            for _ in range(cancellations):
+                task.cancel(); await asyncio.sleep(0.01)
+            assert runtime.lock.locked()
+        finally: release.set()
         with pytest.raises(asyncio.CancelledError): await task
         assert stopped.is_set() and not runtime.owner_ready
     asyncio.run(scenario())
 
 
-def test_cancel_lazy_owner_start_joins_and_stops_before_unlock():
+@pytest.mark.parametrize('cancellations',[1,2])
+def test_cancel_lazy_owner_start_joins_and_stops_before_unlock(cancellations):
     import threading
     async def scenario():
         entered=threading.Event(); release=threading.Event(); stopped=[]
@@ -79,8 +84,10 @@ def test_cancel_lazy_owner_start_joins_and_stops_before_unlock():
         async def consume(): return [x async for x in runtime.stream('dm')]
         task=asyncio.create_task(consume())
         assert await asyncio.to_thread(entered.wait,1)
-        task.cancel(); await asyncio.sleep(0.01)
-        try: assert runtime.lock.locked()
+        try:
+            for _ in range(cancellations):
+                task.cancel(); await asyncio.sleep(0.01)
+            assert runtime.lock.locked()
         finally: release.set()
         with pytest.raises(asyncio.CancelledError): await task
         assert stopped==[True] and runtime.owner.client is None and not runtime.owner_ready
