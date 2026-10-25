@@ -71,7 +71,7 @@ class SDK:
     def start(self): return self
     def on_message_update(self, callback): self.callback=callback
     def get_state(self):
-        return NS(model=NS(provider='openai-codex',id='gpt-6-luna'),dump_tools=(NS(name='web_search'),),session_file=str(Path(self.kw['session_dir'])/'owner.jsonl'))
+        return NS(model=NS(provider='openai-codex',id='gpt-6-luna'),dump_tools=tuple(NS(name=name) for name in self.kw['tools']),session_file=str(Path(self.kw['session_dir'])/'owner.jsonl'))
     def set_model(self, provider, model_id): return self.get_state().model
     def get_available_models(self): return (self.get_state().model,)
     def prompt_and_wait(self, message, **kw):
@@ -119,12 +119,85 @@ def test_no_silent_fallback_or_extra_tools(tmp_path):
             s=super().get_state(); s.model.id='other'; return s
     class Unsafe(SDK):
         def get_state(self):
-            s=super().get_state(); s.dump_tools+=(NS(name='bash'),); return s
+            s=super().get_state(); s.dump_tools+=(NS(name='eval'),); return s
     async def run(factory):
         e=Engine(tmp_path/'omp.exe',tmp_path,sdk_factory=factory)
         with pytest.raises(EngineError): await e.start()
         assert e.client.stopped
     for f in (Wrong,Unsafe): asyncio.run(run(f))
+
+def test_owner_accepts_exact_native_toolset(tmp_path):
+    expected = ('web_search', 'read', 'write', 'edit', 'glob', 'find', 'bash')
+
+    class NativeSDK(SDK):
+        def get_state(self):
+            state = super().get_state()
+            state.dump_tools = tuple(NS(name=name) for name in expected)
+            return state
+
+    async def run():
+        engine = Engine(tmp_path/'omp.exe', tmp_path, sdk_factory=NativeSDK)
+        await engine.start()
+        try:
+            from capri.engine import OWNER_TOOLS
+            assert OWNER_TOOLS == expected
+            assert engine.client.kw['tools'] == expected
+        finally:
+            await engine.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('missing', ['web_search', 'read', 'write', 'edit', 'glob', 'find', 'bash'])
+def test_owner_rejects_missing_tool_and_stops(tmp_path, missing):
+    class MissingSDK(SDK):
+        def get_state(self):
+            state = super().get_state()
+            state.dump_tools = tuple(NS(name=name) for name in
+                ('web_search', 'read', 'write', 'edit', 'glob', 'find', 'bash') if name != missing)
+            return state
+
+    async def run():
+        engine = Engine(tmp_path/'omp.exe', tmp_path, sdk_factory=MissingSDK)
+        with pytest.raises(EngineError):
+            await engine.start()
+        assert engine.client.stopped
+        assert not (tmp_path/'session.json').exists()
+    asyncio.run(run())
+
+
+def test_owner_prompt_explains_windows_shell_at_sdk_boundary(tmp_path):
+    async def run():
+        engine = Engine(tmp_path/'omp.exe', tmp_path, sdk_factory=SDK)
+        await engine.start()
+        try:
+            prompt = engine.client.kw['append_system_prompt']
+            assert 'Windows 11' in prompt
+            assert 'read/write/edit/glob/find' in prompt
+            assert 'pwsh -NoProfile -Command' in prompt
+            assert 'git, python, and node' in prompt
+            assert 'Do not assume POSIX shell utilities' in prompt
+        finally:
+            await engine.close()
+    asyncio.run(run())
+
+
+def test_owner_sdk_prompt_scopes_denial_to_one_call_and_describes_pc_actions(tmp_path):
+    async def run():
+        engine = Engine(tmp_path/'omp.exe', tmp_path, sdk_factory=SDK)
+        await engine.start()
+        try:
+            prompt = engine.client.kw['append_system_prompt']
+            assert 'Approval and PC actions:' in prompt
+            assert 'rejects only that specific call' in prompt
+            assert 'does not disable bash' in prompt
+            assert 'fresh explicit owner request' in prompt
+            assert 'Do not automatically retry' in prompt
+            assert 'launching applications or shutting down/restarting the PC' in prompt
+            assert 'Do not force-close applications' in prompt
+        finally:
+            await engine.close()
+    asyncio.run(run())
+
 
 def test_session_pointer_reused(tmp_path):
     async def run():
@@ -174,7 +247,7 @@ def test_start_appends_conversation_prompt_on_resume(tmp_path):
         assert kw['append_system_prompt'] == CAPRI_CONVERSATION_PROMPT
         assert kw['extra_args'] == ['--no-extensions', '--no-lsp', '--no-pty', '--resume', str(session)]
         assert (kw['provider'], kw['model'], kw['thinking']) == ('openai-codex', 'gpt-6-luna', 'low')
-        assert kw['tools'] == ('web_search',)
+        assert kw['tools'] == ('web_search', 'read', 'write', 'edit', 'glob', 'find', 'bash')
         assert all(kw[key] for key in ('no_skills', 'no_rules', 'no_title', 'no_ui'))
         assert 'system_prompt' not in kw
         await resumed.close()

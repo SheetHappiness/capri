@@ -111,12 +111,12 @@ def test_normal_poller_integration_and_disabled_guest_survives(tmp_path,monkeypa
             async def start(self): pass
             async def close(self): pass
         engine=Owner()
-        monkeypatch.setattr(app,'Engine',lambda *a:engine)
+        monkeypatch.setattr(app,'Engine',lambda *a, **kw:engine)
         monkeypatch.setattr(app,'Bot',lambda *a:bot)
         poll_calls=[]
         async def polling(self,actual_bot,**kw):
             poll_calls.append(kw)
-            assert set(kw['allowed_updates'])=={'message','guest_message'}
+            assert set(kw['allowed_updates'])=={'message','guest_message','callback_query'}
             assert actual_bot is bot
             await self.feed_update(bot,Update(update_id=1,guest_message=message(text='/status')))
         monkeypatch.setattr(Dispatcher,'start_polling',polling)
@@ -137,7 +137,7 @@ def test_malformed_guest_store_does_not_stop_dm_startup(tmp_path,monkeypatch):
         bot=NS(get_me=AsyncMock(return_value=NS(username='Capriompbot',supports_guest_queries=True)),
                session=NS(close=AsyncMock()))
         polling=AsyncMock()
-        monkeypatch.setattr(app,'Engine',lambda *a:owner)
+        monkeypatch.setattr(app,'Engine',lambda *a, **kw:owner)
         monkeypatch.setattr(app,'Bot',lambda *a:bot)
         monkeypatch.setattr(Dispatcher,'start_polling',polling)
         await run('123:TEST',tmp_path/'omp.exe',tmp_path)

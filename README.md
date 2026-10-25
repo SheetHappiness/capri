@@ -150,7 +150,25 @@ survivors, only on `True`. Capri shares this strict contract across owner, Guest
 and runtime handoff through `capri.teardown.stop_child`; exceptions and other return
 values block further children. A cleared SDK process attribute alone proves nothing.
 On Windows the SDK confirms the leader process; POSIX process-group guarantees do
-not apply. Capri retains the existing web-only tool restriction.
+not apply. Owner tools are exactly `web_search`, `read`, `write`, `edit`, `glob`,
+`find`, and `bash`; Guest remains `web_search`-only. Native OMP approval mode is
+`write`: filesystem reads/writes are allowed, exec requires approval. Only the exact
+commands `git status`, `git diff`, `git log`, `git show`, `python --version`, and
+`node --version` are auto-approved; extra arguments and compound commands receive
+no allowlist bypass. Other shell calls show a private Owner approval message with
+**Дозволити один раз** / **Відхилити** buttons, the command and effective working
+directory. Only the paired Owner can answer, once, from that message. The deadline
+is at most 60 seconds and is bounded by the remaining turn deadline. Timeout,
+uncertain delivery, `/stop`, restart and stale buttons fail closed. No session or
+permanent shell grants are exposed. Truncated/ambiguous native approval prompts
+are rejected, not guessed; unsupported UI is cancelled. Guest has no approval UI.
+See [Owner approval verification](docs/verification/owner-approval.md) for evidence
+and pending live acceptance.
+Windows-native shell commands must use explicit `pwsh -NoProfile -Command ...`;
+PowerShell 7 (`pwsh`) must be installed and on PATH to execute those commands once
+approved. This is not a filesystem sandbox. See
+[native tools verification](docs/verification/native-tools.md) for evidence and
+remaining live acceptance.
 
 ## Verify
 

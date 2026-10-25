@@ -82,6 +82,7 @@ def test_guest_resume_isolation_and_public_text(tmp_path):
             assert '--resume' not in sdk.kw['extra_args'] and not sdk.kw.get('no_session')
             assert sdk.kw['session_dir'] == directory.resolve()
             assert sdk.kw['tools'] == ('web_search',)
+            assert sdk.kw['no_ui'] is True
             payload = json.loads(sdk.messages[0].split('\n',1)[1])
             assert payload == {'text':'hello','reference':{'text':'quoted secret'}}
         assert before == [(p.read_bytes(),p.stat().st_mtime_ns) for p in (owner,transcript)]
