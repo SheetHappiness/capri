@@ -66,6 +66,9 @@ class OmpRuntime:
             return SteerResult.NOT_ACTIVE
         return await self.owner.steer(text)
 
+    def request_abort(self):
+        self.owner.request_abort()
+
     async def answer_approval(self, request_id, value):
         # The turn holds runtime.lock while OMP awaits this UI response.
         if not self.owner_ready or not self.safe:
@@ -190,6 +193,11 @@ class InboundFlow:
             await self.worker
 
     async def stop(self):
+        # Close the approval gate before cancellation can yield to a separate
+        # Telegram callback. Some injected streams have no approval capability.
+        request_abort = getattr(self.engine, 'request_abort', None)
+        if request_abort is not None and self.worker is not None and not self.worker.done():
+            request_abort()
         self.pending.clear()
         # Cancel both before joining either: a steer ACK must never delay abort.
         tasks = [task for task in (self.burst, self.worker) if task is not None]

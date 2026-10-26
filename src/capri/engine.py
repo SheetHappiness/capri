@@ -110,9 +110,15 @@ class Engine:
             # dialogs, including startup requests without a turn, fail closed.
             self.client.cancel_ui_request(request.id)
 
+    def request_abort(self) -> None:
+        """Invalidate approvals synchronously before asynchronous cancellation."""
+        self._aborting = True
+        self._pending_ui.clear()
+
     async def answer_approval(self, request_id: str, value: str) -> bool:
         request = self._pending_ui.get(request_id)
-        if request is None or value not in (request.options or ()) or not self._active:
+        if (self._aborting or not self._active or request is None
+                or value not in (request.options or ())):
             return False
         del self._pending_ui[request_id]
         client = self.client
@@ -129,6 +135,7 @@ class Engine:
         async with self._lock:
             if self.client is None or self._failed:
                 raise EngineError('OMP is not running; restart Capri')
+            self._aborting = False
             self._loop = asyncio.get_running_loop()
             queue = self._queue = asyncio.Queue()
             async def submit():

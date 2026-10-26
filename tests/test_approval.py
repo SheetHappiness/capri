@@ -45,9 +45,17 @@ def test_sdk_approval_reply_is_native_once_only_and_abort_clears_pending(tmp_pat
             engine.client.ready.clear()
             stream = engine.stream('again')
             await anext(stream)
+            engine.request_abort()
+            assert await engine.answer_approval('native-1', 'Approve') is False
             await stream.aclose()
             assert engine.client.aborted
             assert await engine.answer_approval('native-1', 'Approve') is False
+            engine.client.ready.clear()
+            engine.client.aborted = False
+            stream = engine.stream('new turn')
+            await anext(stream)
+            assert await engine.answer_approval('native-1', 'Approve') is True
+            assert [part async for part in stream] == []
         finally:
             await engine.close()
     asyncio.run(run())
@@ -197,6 +205,81 @@ def test_native_approval_crosses_runtime_without_locking_and_closes_card(tmp_pat
             engine.client.release.set()
             await flow.stop()
             await engine.close()
+    asyncio.run(run())
+
+
+def test_stop_rejects_approval_before_stream_cleanup_and_abort_finish(tmp_path):
+    from capri.approval import ApprovalUI
+    from capri.app import InboundFlow, OmpRuntime
+
+    class Waiting(SDK):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.release = threading.Event()
+            self.abort_entered = threading.Event()
+            self.finish_abort = threading.Event()
+            self.responses = []
+        def send_ui_value(self, id, value):
+            self.responses.append((id, value))
+        def prompt_and_wait(self, *args, **kw):
+            self.ui_callback(request())
+            assert self.release.wait(5)
+            return NS(result=NS(status='aborted'))
+        def abort(self):
+            self.abort_entered.set()
+            assert self.finish_abort.wait(5)
+            self.release.set()
+
+    async def run():
+        engine = Engine(tmp_path/'omp.exe', tmp_path, sdk_factory=Waiting)
+        await engine.start()
+        receiving = asyncio.Event()
+        cancelled = asyncio.Event()
+        cleanup = asyncio.Event()
+        class SlowCleanupRuntime(OmpRuntime):
+            async def stream(self, text):
+                source = super().stream(text)
+                try:
+                    async for part in source:
+                        yield part
+                        receiving.set()
+                        try:
+                            await asyncio.Event().wait()
+                        except asyncio.CancelledError:
+                            cancelled.set()
+                            await cleanup.wait()
+                            raise
+                finally:
+                    await source.aclose()
+        runtime = SlowCleanupRuntime(engine, NS(safe=True))
+        bot = Bot()
+        ui = ApprovalUI(bot, lambda: 7, runtime.answer_approval)
+        flow = InboundFlow(bot, runtime, approvals=ui)
+        stop = None
+        try:
+            flow.submit(7, 'echo')
+            await asyncio.wait_for(receiving.wait(), 1)
+            row = bot.messages[0]['reply_markup'].inline_keyboard[0]
+            stop = asyncio.create_task(flow.stop())
+            await asyncio.wait_for(cancelled.wait(), 1)
+            assert engine._active and not stop.done()
+            assert not engine.client.abort_entered.is_set()
+            query = NS(id='racing', data=row[0].callback_data, from_user=NS(id=7),
+                message=NS(chat=NS(id=7, type='private'), message_id=1))
+            await asyncio.wait_for(ui.handle(query), 1)
+            assert engine.client.responses == []
+            cleanup.set()
+            assert await asyncio.to_thread(engine.client.abort_entered.wait, 1)
+            assert not stop.done() and engine.client.responses == []
+        finally:
+            cleanup.set()
+            engine.client.finish_abort.set()
+            engine.client.release.set()
+            if stop is not None:
+                await asyncio.wait_for(stop, 2)
+            await flow.stop()
+            await engine.close()
+        assert not ui.pending and not runtime.lock.locked()
     asyncio.run(run())
 
 
