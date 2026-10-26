@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-10-27",
+  "status": "standalone-windows-proof-pass",
+  "platform": "win32",
+  "arch": "x64",
+  "os": "Microsoft Windows NT 10.0.26200.0",
+  "bun": "1.4.4",
+  "bun_revision": "38afee6c8",
+  "rust_toolchain": "nightly-2026-10-06",
+  "rustc": "rustc 1.101.0-nightly (ea137335b 2026-10-05)",
+  "cargo": "cargo 1.101.0-nightly (f3865b2a4 2026-09-29)",
+  "msvc_toolset_directory": "14.44.35207",
+  "msvc_compiler": "19.44.35229",
+  "windows_sdk": "10.0.26100.0",
+  "cmake": "4.4.4",
+  "ninja": "1.12.1",
+  "profile": "ci",
+  "cargo_jobs": 8,
+  "rustflags": [
+    "-C",
+    "target-feature=+crt-static",
+    "-C",
+    "target-cpu=x86-64-v2"
+  ],
+  "bun_target": "bun-windows-x64-baseline",
+  "source_commit": "45c35e40c46166dc726ccc52f5d27f40f2449f99",
+  "source_archive_sha256": "a8bbb85ede151ed58c100e84e6d239ca835937e04a51cd287049a9ff737fd4e2",
+  "python": "3.14.7",
+  "scope": "Task 1 only; no Capri integration or clean-CI acceptance",
+  "source_patches": [
+    {
+      "path": "packages/natives/scripts/build-bindings.ts",
+      "original_sha256": "7bb1ff53102d072a3f2c0dae0e67bc2a89516bb9c63bc568bccbf4ba48b992aa",
+      "current_sha256": "383c2e36881132393026bd32e8e902934e876c2a3b19a0bdf8ffbe6909af1a4e"
+    },
+    {
+      "path": "scripts/host-detect.ts",
+      "original_sha256": "7f6b2373dbb8aafdc1610cab899e85cbfb04817dc6faa422b51a3b20746733d6",
+      "current_sha256": "73882c3a878d7266536a2a2d39a4b57db07989805e135fede893316af1b6af5a"
+    }
+  ],
+  "source_lock_sha256": {
+    "bun.lock": "6e330e18ca780dfccd6b6161818c204155f4c2cefce482bfead3e8315406a048",
+    "Cargo.lock": "7ad6fbbfbc0c7e349b3914f4742dcfd7380d5ccca1f92a2cebd245bcd5be8312"
+  },
+  "executable": {
+    "sha256": "8cd72e5ccef44dc052143a61e92c012b509a8f621a6216397c871183d2670ec8",
+    "size_bytes": 243021824,
+    "version": "omp/18.12.6"
+  },
+  "embedded_native": {
+    "sha256": "b415765948e79603ce877a671830eaf6caec80a34c234b38f8bbc85717171371",
+    "filename": "pi_natives.win32-x64-baseline.node"
+  },
+  "temp_requirement": "Short repository-local TEMP/TMP; nested per-run state temp exceeded Windows Unix socket path limit",
+  "acceptance": {
+    "native_host_wrapper": true,
+    "version": true,
+    "help": true,
+    "worker_smoke": true,
+    "auth_free_rpc": true,
+    "luna_prompt": true,
+    "native_grep": true,
+    "confirmed_stops": 2,
+    "global_omp_and_bun_absent_from_smoke_path": true,
+    "owner_state_unchanged": true,
+    "negative_dependency_clean_ci": false
+  },
+  "native_build_result": {
+    "exit_code": 0,
+    "started": "2026-10-26T23:24:04.3425716+00:00",
+    "finished": "2026-10-26T23:27:08.6161409+00:00",
+    "profile": "ci",
+    "isa": "baseline",
+    "jobs": 8
+  },
+  "binary_build_result": {
+    "exit_code": 0,
+    "started": "2026-10-26T23:30:43.9683158+00:00",
+    "finished": "2026-10-26T23:31:13.7303211+00:00",
+    "target": "bun-windows-x64-baseline"
+  },
+  "review": "Independent read-only evidence review: no Critical/Important findings; smoke environment merge and reproduction-note minors addressed before final freeze.",
+  "source_patch_sha256": "08437b23ff0228e281f34ce75cb0f6cf9610225c8c08042ce9241b0fd4ee3fab",
+  "smoke_argv_flags": [
+    "--version",
+    "--help",
+    "--smoke-test"
+  ]
+}

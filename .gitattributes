@@ -1,0 +1,4 @@
+# Vendored bytes are verified against the upstream archive, including on Windows.
+vendor/omp/** -text -filter
+vendor/omp-source-manifest.json text eol=lf
+vendor/omp-patches/** text eol=lf

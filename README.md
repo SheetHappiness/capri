@@ -124,9 +124,11 @@ messages. Future sticker/PC actions still need a separate ordered tool integrati
 - OMP binary: 18.12.6 Windows x64, release commit `45c35e40c46166dc726ccc52f5d27f40f2449f99`.
 - SHA-256: `73d73c11dc8821cf939441a964992aefc9c5b0d5a4418e9e8985a46439b60eef`.
 - Binary metadata: https://build.stencil.so/api/products/omp/versions/18.12.6/windows-x86_64
-- Official SDK source: `sdk/python/omp-rpc` at that exact commit; SDK version 0.1.0 is NOT sufficient provenance by itself.
+- Official SDK source: `vendor/omp/sdk/python/omp-rpc` at that exact commit; SDK version 0.1.0 is NOT sufficient provenance by itself.
 - SDK source archive SHA-256: `a8bbb85ede151ed58c100e84e6d239ca835937e04a51cd287049a9ff737fd4e2`.
-  `pyproject.toml` installs this immutable official archive and verifies its hash.
+  The complete source is included under `vendor/omp`; no OMP SDK download is needed.
+  [Provenance and local patches](vendor/omp/UPSTREAM.md) are checked with
+  `python scripts/verify-vendor.py --root .`.
 - aiogram: 3.31.0. No global OMP or Bun required.
 
 For a new checkout, download and hash-check that binary into `.runtime/omp.exe`, then:
@@ -135,6 +137,12 @@ For a new checkout, download and hash-check that binary into `.runtime/omp.exe`,
 python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-test.txt
 ```
+
+For application dependencies only, use `requirements-runtime.txt`. Run both
+requirements commands from the checkout root: they explicitly install the local
+SDK before resolving Capri. `pip install -e .` alone does not establish SDK
+provenance. The vendored source import has not switched the executable yet;
+the existing `.runtime/omp.exe` remains in use until the later runtime task.
 
 Create `.runtime/bot-token` locally, and log in with the official OMP flow using the same private agent directory:
 

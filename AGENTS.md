@@ -14,13 +14,13 @@ Run commands from the repository root in PowerShell:
 
 ```powershell
 python -m venv .venv
-.venv/Scripts/python -m pip install -e . pytest
+.venv/Scripts/python -m pip install -r requirements-test.txt
 .venv/Scripts/python -m pytest -q
 .venv/Scripts/python -m pytest tests/test_engine.py -q
 .venv/Scripts/python -m capri.cli
 ```
 
-These create the environment, install Capri, run all or focused tests, and launch the bot. Before installation, follow README instructions to obtain the hash-verified OMP binary and install its exact matching official SDK source. The SDK version alone does not establish provenance. Packaging uses setuptools; no npm build is required.
+These create the environment, install Capri with its vendored SDK, run all or focused tests, and launch the bot. Run installation from the checkout root; requirements explicitly select `vendor/omp/sdk/python/omp-rpc`. Use `python scripts/verify-vendor.py --root .` to check source provenance. The SDK version alone does not establish provenance, and `pip install -e .` alone is not the supported install command. Follow README instructions for the existing hash-verified OMP executable; the source import has not switched that runtime yet. Packaging uses setuptools; no npm build is required for Python tests.
 
 ## Coding Style & Naming Conventions
 Use four-space indentation, `snake_case` functions and variables, `PascalCase` classes, and uppercase constants. Follow surrounding Python style and add type annotations where useful. Keep asynchronous Telegram handling separate from OMP lifecycle and configuration logic. No formatter or linter is currently configured.

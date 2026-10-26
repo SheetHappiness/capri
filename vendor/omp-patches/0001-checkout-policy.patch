@@ -1,0 +1,35 @@
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -66,3 +66,6 @@
+ # Generated tree-sitter parser: regenerate from grammar.js (see its README.md).
+ crates/vendor/tree-sitter-go/src/parser.c linguist-generated
+ 
++
++# Capri: preserve pinned archive bytes; do not invoke Git LFS.
++* -text -filter !eol
+--- a/crates/pi-edit/tests/fixtures/apply_patch/scenarios/.gitattributes
++++ b/crates/pi-edit/tests/fixtures/apply_patch/scenarios/.gitattributes
+@@ -1 +1,4 @@
+ ** text eol=lf
++
++# Capri: preserve pinned archive bytes; do not invoke Git LFS.
++* -text -filter !eol
+--- a/crates/pi-natives/tools/.gitignore
++++ b/crates/pi-natives/tools/.gitignore
+@@ -1,2 +1,16 @@
+ # Downloaded raw tokenizer sources; generated data/*.bin.zst is committed.
+ cache/
++
++# Capri: keep pinned upstream fixtures/source visible to Git.
++!/cache/
++/cache/*
++!/cache/cl100k_base.tiktoken
++!/cache/ctok_v3.bin
++!/cache/ctok_v4_7.bin
++!/cache/deepseek-v3.tokenizer.json
++!/cache/deepseek-v4.tokenizer.json
++!/cache/glm-5.tokenizer.json
++!/cache/kimi.tiktoken.model
++!/cache/o200k_base.tiktoken
++!/cache/qwen3.8.tokenizer.json
++!/cache/tokenization_kimi.py
