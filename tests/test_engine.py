@@ -70,6 +70,11 @@ class SDK:
         self.kw=kw; self.stopped=False; self.messages=[]; self.fail=False
     def start(self): return self
     def on_message_update(self, callback): self.callback=callback
+    def on_ui_request(self, callback): self.ui_callback=callback
+    def on_tool_execution_start(self, callback): self.tool_start=callback
+    def on_tool_execution_update(self, callback): self.tool_update=callback
+    def on_tool_stream_update(self, callback): self.tool_stream=callback
+    def on_tool_execution_end(self, callback): self.tool_end=callback
     def get_state(self):
         return NS(model=NS(provider='openai-codex',id='gpt-6-luna'),dump_tools=(NS(name='web_search'),),session_file=str(Path(self.kw['session_dir'])/'owner.jsonl'))
     def set_model(self, provider, model_id): return self.get_state().model
@@ -77,7 +82,7 @@ class SDK:
     def prompt_and_wait(self, message, **kw):
         self.messages.append(message)
         if self.fail: raise RuntimeError('private secret SDK stderr')
-        for kind,delta in [('thinking_delta','private thought'),('text_delta','Hello '),('toolcall_delta','private args'),('text_delta','owner')]:
+        for kind,delta in [('text_delta','Hello '),('toolcall_delta','private args'),('text_delta','owner')]:
             self.callback(NS(message={'role':'assistant'},assistant_message_event={'type':kind,'delta':delta}))
         return NS(result=NS(status='completed',error=None))
     def abort(self): pass
@@ -113,18 +118,50 @@ def test_private_errors_not_exposed(tmp_path):
         await e.close()
     asyncio.run(run())
 
-def test_no_silent_fallback_or_extra_tools(tmp_path):
+def test_no_silent_model_fallback(tmp_path):
     class Wrong(SDK):
         def get_state(self):
             s=super().get_state(); s.model.id='other'; return s
-    class Unsafe(SDK):
-        def get_state(self):
-            s=super().get_state(); s.dump_tools+=(NS(name='bash'),); return s
     async def run(factory):
         e=Engine(tmp_path/'omp.exe',tmp_path,sdk_factory=factory)
         with pytest.raises(EngineError): await e.start()
         assert e.client.stopped
-    for f in (Wrong,Unsafe): asyncio.run(run(f))
+    asyncio.run(run(Wrong))
+
+
+def test_native_tools_and_activity_share_the_existing_owner_stream(tmp_path):
+    from omp_rpc import MessageUpdateEvent, ToolExecutionStartEvent, ToolExecutionUpdateEvent, ToolExecutionEndEvent
+    thinking = MessageUpdateEvent(message={'role': 'assistant'},
+        assistant_message_event={'type': 'thinking_delta', 'delta': 'Checking files'})
+    started = ToolExecutionStartEvent(tool_call_id='r', tool_name='read', args={'path': 'note.md'})
+    updated = ToolExecutionUpdateEvent(tool_call_id='r', tool_name='read',
+        partial_result={'content': [{'type': 'text', 'text': 'partial'}]})
+    ended = ToolExecutionEndEvent(tool_call_id='r', tool_name='read',
+        result={'content': [{'type': 'text', 'text': 'content'}]}, is_error=False)
+
+    class NativeSDK(SDK):
+        def get_state(self):
+            state = super().get_state()
+            state.dump_tools = tuple(NS(name=name) for name in ('read', 'write', 'edit', 'bash', 'web_search'))
+            return state
+        def prompt_and_wait(self, message, **kw):
+            self.callback(thinking)
+            self.tool_start(started)
+            self.tool_update(updated)
+            self.tool_end(ended)
+            return super().prompt_and_wait(message, **kw)
+
+    async def run():
+        e = Engine(tmp_path/'omp.exe', tmp_path, sdk_factory=NativeSDK)
+        await e.start()
+        try:
+            assert 'tools' not in e.client.kw
+            assert [x async for x in e.stream('read note')] == [thinking, started, updated, ended, 'Hello ', 'owner']
+            e._on_update(thinking)  # Late callbacks after close of a turn are discarded.
+            assert e._queue is None
+        finally:
+            await e.close()
+    asyncio.run(run())
 
 def test_session_pointer_reused(tmp_path):
     async def run():
@@ -172,10 +209,12 @@ def test_start_appends_conversation_prompt_on_resume(tmp_path):
         await resumed.start()
         kw = resumed.client.kw
         assert kw['append_system_prompt'] == CAPRI_CONVERSATION_PROMPT
-        assert kw['extra_args'] == ['--no-extensions', '--no-lsp', '--no-pty', '--resume', str(session)]
+        assert kw['extra_args'] == ['--no-extensions', '--no-lsp', '--no-pty',
+            '--config', str(tmp_path/'capri-isolation.yml'), '--resume', str(session)]
         assert (kw['provider'], kw['model'], kw['thinking']) == ('openai-codex', 'gpt-6-luna', 'low')
-        assert kw['tools'] == ('web_search',)
-        assert all(kw[key] for key in ('no_skills', 'no_rules', 'no_title', 'no_ui'))
+        assert 'tools' not in kw
+        assert all(kw[key] for key in ('no_skills', 'no_rules', 'no_title'))
+        assert kw['no_ui'] is False
         assert 'system_prompt' not in kw
         await resumed.close()
     asyncio.run(run())

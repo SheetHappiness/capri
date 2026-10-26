@@ -10,6 +10,20 @@ DISCOVERY_PROVIDERS = ['agent-plugins', 'agents', 'agents-md', 'claude', 'claude
 OMP_CONFIG = {'modelRoles': {'web': 'openai-codex/gpt-6-luna'},
               'mcp': {'enableProjectConfig': False},
               'disabledProviders': DISCOVERY_PROVIDERS}
+APPROVAL_MODES = ('yolo', 'write', 'always-ask', 'always-ask-cached')
+
+
+def omp_environment(data: Path) -> dict[str, str]:
+    return {'PI_CODING_AGENT_DIR': str(data / 'agent'), 'OMP_PROFILE': '',
+            'PI_PROFILE': '', 'PI_CONFIG_DIR': '.capri-omp'}
+
+
+def omp_isolation_args(data: Path) -> list[str]:
+    # OMP owns config.yml, including saved permissions. Keep Capri's required
+    # discovery/model isolation in a separate overlay instead of replacing it.
+    overlay = data / 'capri-isolation.yml'
+    write_json(overlay, OMP_CONFIG)
+    return ['--config', str(overlay)]
 
 
 def write_json(path: Path, value: object) -> None:

@@ -78,6 +78,9 @@ def test_guest_resume_isolation_and_public_text(tmp_path):
             parts = [x async for x in engine.stream(directory,text='hello',reference_text='quoted secret')]
             assert [(x.kind,x.text) for x in parts] == [('start',''),('text','Hello '),('text','owner'),('message','Hello owner'),('final','Hello owner')]
             sdk = GuestSDK.instances[-1]
+            assert sdk.kw['extra_args'][-2:] == ['--approval-mode', 'yolo']
+            overlay = Path(sdk.kw['extra_args'][sdk.kw['extra_args'].index('--config') + 1])
+            assert json.loads(overlay.read_text())['mcp']['enableProjectConfig'] is False
             assert sdk.resumed is resumed and sdk.stopped
             assert '--resume' not in sdk.kw['extra_args'] and not sdk.kw.get('no_session')
             assert sdk.kw['session_dir'] == directory.resolve()

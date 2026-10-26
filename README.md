@@ -2,6 +2,7 @@
 
 Windows x64 / Python 3.14, official OMP Python RPC SDK, aiogram long polling.
 One explicitly paired owner, private text, throttled live drafts and streamed durable bubbles.
+Owner DMs use OMP's native tools and a separate live activity message.
 Owner-only Telegram Guest Mode uses separate persistent chat-scoped Luna threads.
 OMP owns the conversation and persistent session. Its existing Codex search is pinned to Luna.
 
@@ -150,7 +151,80 @@ survivors, only on `True`. Capri shares this strict contract across owner, Guest
 and runtime handoff through `capri.teardown.stop_child`; exceptions and other return
 values block further children. A cleared SDK process attribute alone proves nothing.
 On Windows the SDK confirms the leader process; POSIX process-group guarantees do
-not apply. Capri retains the existing web-only tool restriction.
+not apply. Guest sessions retain their web-only tool restriction. Owner sessions
+leave tool selection to OMP; Capri does not implement tools or an approval engine.
+
+## Owner permission mode
+
+Send `/permission` (or `/permissions`) in the paired owner's private DM to read OMP's current approval
+mode and choose a standard mode with the menu buttons. The direct form also works:
+`/permission yolo`, `/permission write`, `/permission always-ask`, or
+`/permission always-ask-cached`. Commands and buttons bypass the model and steering.
+Busy owner/Guest work must finish or be stopped before opening/changing this setting.
+
+The pinned OMP version exposes no approval-setting RPC; Capri invokes its native
+`config get/set tools.approvalMode --json` commands in the same private environment.
+OMP validates and saves the setting in `.runtime/agent/config.yml`. Capri keeps
+mandatory discovery/model isolation in `.runtime/capri-isolation.yml`, passed as
+a config overlay, so startup no longer overwrites OMP's saved settings.
+Before a change, the idle owner child is reaped. The next DM lazily resumes the same
+session with the saved mode; a restart preserves it. Guest keeps web_search only
+and its previous native yolo mode, independently of this owner setting.
+
+Native approval requests appear as separate owner-only cards with one inline row:
+`Once`, `Session`, `Deny`. Once and Deny affect this call; Session forwards OMP's
+offered session choice, whose exact scope appears in the card. It is omitted when
+OMP offers no session grant. Cached mode uses the exact target grant where offered,
+otherwise the native directory grant. Persistent Always grants are not exposed.
+OMP retains all approval decisions and session grants; Capri only returns its exact
+native option. Session grants last for the current OMP child, so restart or Guest
+handoff can require approval again. Saved permission mode persists independently.
+
+Only the paired owner can press a card's buttons, in its original private message.
+Duplicate/expired clicks do nothing. Buttons are invalidated when answered, cancelled,
+or the turn ends. Failed/uncertain card delivery or an oversized native prompt declines
+the request rather than retrying or approving an additionally truncated card.
+Unsupported interactive dialogs are cancelled. Owner RPC UI is enabled only for this
+approval bridge; external extensions remain disabled and Guest stays headless.
+Default yolo behavior stays unchanged until the owner selects a mode.
+See [permission verification](docs/verification/permission-command.md).
+Native decision behavior is recorded in [approval verification](docs/verification/approval-buttons.md).
+
+## Owner OMP activity
+
+In an owner DM, OMP can choose its native tools, including file and command tools
+available in its current configuration. Its working directory remains `.runtime/work`;
+that directory is a working location, not a filesystem sandbox. Existing disabled
+external discovery, extensions, skills and rules settings remain in place.
+
+The first exposed thinking or tool event creates one plain-text activity message,
+without a heading or thinking icon. Further events edit that same message at most
+once per 0.75 seconds,
+coalescing bursts. It shows only thinking text actually exposed by the provider,
+native tool names/arguments, textual result snapshots, and edit-preview file paths
+or diagnostics where supplied. Binary payloads and opaque result details are omitted.
+The view keeps the latest thinking block and four recent tool calls, with bounded
+excerpts and a visible ellipsis when clipped. It stays within Telegram's 4096 UTF-16
+unit limit. Completion adds `✓ done`; a failed stream adds `✗ failed`.
+
+Capri's public text still uses the existing drafts and durable `<bubble>` messages;
+technical activity never enters the bubble parser. Activity delivery failures disable
+that view for the turn while normal answer delivery continues. Explicit rate limits
+pace retries, including at most one final retry; uncertain initial sends are never
+repeated. Completion allows at most two seconds for the activity footer, then cancels
+and joins its sender so a flood wait or slow API cannot hold the answer.
+`/stop` and shutdown cancel and join the activity sender before closing the
+source. An interrupted view may retain its last snapshot; it does not claim completion.
+Text-only turns without exposed activity create no technical message.
+
+This iteration adds no personality file, memory or proactive behavior. The existing
+appended conversation prompt remains separate from the activity renderer, leaving
+the future `soul.md` layer independent of runtime and UI event handling.
+Both owner and Guest prompts request plain-text prose, including exposed reasoning,
+without Markdown styling markers such as `**`. Actual code and file content retain
+their literal syntax.
+See [OMP Remote UI verification](docs/verification/omp-remote-ui.md) for contract
+provenance, automated checks and the remaining live Telegram acceptance.
 
 ## Verify
 

@@ -116,7 +116,7 @@ def test_normal_poller_integration_and_disabled_guest_survives(tmp_path,monkeypa
         poll_calls=[]
         async def polling(self,actual_bot,**kw):
             poll_calls.append(kw)
-            assert set(kw['allowed_updates'])=={'message','guest_message'}
+            assert set(kw['allowed_updates'])=={'message','guest_message','callback_query'}
             assert actual_bot is bot
             await self.feed_update(bot,Update(update_id=1,guest_message=message(text='/status')))
         monkeypatch.setattr(Dispatcher,'start_polling',polling)

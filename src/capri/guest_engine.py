@@ -8,6 +8,7 @@ import re
 import threading
 from omp_rpc import RpcClient, assistant_text
 from .engine import EngineError
+from .config import omp_environment, omp_isolation_args
 from .prompt import CAPRI_GUEST_PROMPT
 from .teardown import complete_cleanup, stop_child
 
@@ -39,11 +40,11 @@ class GuestEngine:
         work = self.data/'guest/work'
         work.mkdir(parents=True, exist_ok=True)
         client = self.sdk_factory(executable=str(self.executable), cwd=work,
-            env={'PI_CODING_AGENT_DIR': str(self.data/'agent'), 'OMP_PROFILE': '',
-                 'PI_PROFILE': '', 'PI_CONFIG_DIR': '.capri-omp'},
+            env=omp_environment(self.data),
             session_dir=directory, provider='openai-codex', model='gpt-6-luna',
             thinking='low', tools=('web_search',), no_skills=True, no_rules=True,
-            no_title=True, no_ui=True, extra_args=['--no-extensions','--no-lsp','--no-pty'],
+            no_title=True, no_ui=True, extra_args=['--no-extensions','--no-lsp','--no-pty',
+                *omp_isolation_args(self.data), '--approval-mode', 'yolo'],
             append_system_prompt=CAPRI_GUEST_PROMPT)
         loop = asyncio.get_running_loop()
         queue = asyncio.Queue()

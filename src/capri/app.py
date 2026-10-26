@@ -13,7 +13,9 @@ from .guest import GuestService
 from .guest_engine import GuestEngine
 from .guest_threads import GuestThreadStore, ThreadError
 from .engine import EngineError
-from .teardown import join_cleanup, stop_child
+from .teardown import complete_cleanup, join_cleanup, stop_child
+from .permission import handle_permission_callback, show_permission
+from .approval import ApprovalUI
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +66,30 @@ class OmpRuntime:
             return SteerResult.NOT_ACTIVE
         return await self.owner.steer(text)
 
+    async def answer_approval(self, request_id, value):
+        # The turn holds runtime.lock while OMP awaits this UI response.
+        if not self.owner_ready or not self.safe:
+            return False
+        return await self.owner.answer_approval(request_id, value)
+
+    async def permission(self, mode=None):
+        if self.lock.locked():
+            raise EngineError('Спершу дочекайся завершення відповіді або надішли /stop.')
+        async with self.lock:
+            self._check()
+            async def configure():
+                if mode is not None and self.owner_ready:
+                    # Reap before saving: no idle child's pending settings save
+                    # can race this update. The next DM resumes the same session.
+                    self.safe = False
+                    self.owner_ready = False
+                    self.safe = await asyncio.to_thread(stop_child, self.owner.client)
+                    if self.safe:
+                        self.owner.client = None
+                    self._check()
+                return await self.owner.permission(mode)
+            return await complete_cleanup(configure())
+
     async def stream_guest(self, directory, **kwargs):
         async with self.lock:
             self._check()
@@ -95,9 +121,10 @@ class OmpRuntime:
 
 class InboundFlow:
     """One owner, one response consumer, FIFO overflow and a short steer debounce."""
-    def __init__(self, bot, engine, *, debounce=0.5):
+    def __init__(self, bot, engine, *, debounce=0.5, approvals=None):
         self.bot = bot
         self.engine = engine
+        self.approvals = approvals
         self.debounce = debounce
         self.pending = deque()
         self.worker = None
@@ -151,7 +178,7 @@ class InboundFlow:
             self.responding = True
             try:
                 await deliver(self.bot, chat_id, self.engine.stream(text),
-                    draft_id=secrets.randbelow(2**31-1)+1)
+                    draft_id=secrets.randbelow(2**31-1)+1, approvals=self.approvals)
             finally:
                 self.responding = False
             if self.burst is not None:
@@ -187,6 +214,11 @@ async def handle_text(message, bot, engine, pairing, lock):
     if message.text.strip() == '/stop':
         await lock.stop()
         return
+    parts = message.text.strip().split(maxsplit=1)
+    if parts and parts[0] in ('/permission', '/permissions'):
+        await show_permission(bot, message.chat.id, engine,
+                              parts[1] if len(parts) > 1 else None)
+        return
     lock.submit(message.chat.id, message.text)
 
 
@@ -196,16 +228,34 @@ async def run(token: str, executable: Path, data: Path):
     dp = Dispatcher()
     pairing = Pairing(data / 'owner.json')
     runtime = OmpRuntime(engine, GuestEngine(executable, data))
-    lock = InboundFlow(bot, runtime)
+    approvals = ApprovalUI(bot, lambda: pairing.owner_id, runtime.answer_approval)
+    lock = InboundFlow(bot, runtime, approvals=approvals)
     guest = None
+    owner_handlers = set()
+    stopping = False
     router = Router()
+    async def owner_handler(handler, *args):
+        if stopping:
+            return
+        task = asyncio.current_task()
+        owner_handlers.add(task)
+        try:
+            return await handler(*args)
+        finally:
+            owner_handlers.discard(task)
     @router.message(F.text)
     async def on_text(message):
-        await handle_text(message, bot, engine, pairing, lock)
+        await owner_handler(handle_text, message, bot, runtime, pairing, lock)
     @router.guest_message()
     async def on_guest(message):
         if guest is not None:
             await guest.handle(message)
+    @router.callback_query(F.data.startswith('permission:'))
+    async def on_permission(query):
+        await owner_handler(handle_permission_callback, query, bot, runtime, pairing)
+    @router.callback_query(F.data.startswith('approval:'))
+    async def on_approval(query):
+        await owner_handler(approvals.handle, query)
     dp.include_router(router)
     try:
         await engine.start()
@@ -228,8 +278,21 @@ async def run(token: str, executable: Path, data: Path):
             print(f'Capri @{me.username} ready for owner {pairing.owner_id}', flush=True)
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), close_bot_session=False)
     finally:
-        if guest is not None:
-            await guest.close()
-        await lock.stop()
-        await engine.close()
-        await bot.session.close()
+        stopping = True
+        async def cleanup():
+            handlers = list(owner_handlers)
+            for task in handlers:
+                task.cancel()
+            try:
+                if guest is not None:
+                    await guest.close()
+                await lock.stop()
+            finally:
+                # aiogram does not join detached update handlers on polling
+                # shutdown. A permission save must finish before closing OMP.
+                await asyncio.gather(*handlers, return_exceptions=True)
+                try:
+                    await engine.close()
+                finally:
+                    await bot.session.close()
+        await complete_cleanup(cleanup())
