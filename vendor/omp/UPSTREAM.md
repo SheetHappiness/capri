@@ -55,9 +55,20 @@ does not establish SDK provenance and is not the supported installation path.
 Do not substitute an arbitrary package-index distribution of the same version.
 Third-party Python dependencies/build backends can still need registry access.
 
-Capri still uses its existing executable path. Task 3 adds private source/runtime
-environment paths but does not rebuild, replace or restart the running bot.
-The old executable lacks the root hook. Task 4 Step 2 adds a candidate-only build wrapper: verified snapshot copy,
-pinned toolchain, native build and staged exe. It does not smoke-test, promote
-or switch the runtime. Compiled isolation acceptance and the clean-machine
-negative-dependency CI gate remain later tasks.
+Normal Capri CLI startup checks that installed SDK metadata identifies this
+checkout's `vendor/omp/sdk/python/omp-rpc` directory before reading credentials
+or importing the SDK-dependent application. Missing or foreign origins are
+rejected with the supported requirements reinstall command. `--help` and the
+Telegram-only `--guest-probe` do not require this SDK check.
+
+For the full source build, run `./scripts/bootstrap.ps1` from the Capri root.
+Bootstrap verifies source and SDK provenance, prepares pinned private tools,
+builds native components and the executable from a fresh verified source copy,
+then runs auth-free RPC smoke and teardown checks before publishing to
+`<data>/bin/omp.exe`, the CLI default. It does not log in or restart the bot.
+
+Two complete bootstrap runs passed on the prepared local Windows machine.
+Fresh-Windows and authenticated Telegram acceptance remain pending; native-build
+CI is also follow-up work. See the
+[build and acceptance evidence](../../docs/verification/vendored-omp.md) for
+recorded results and their limits.

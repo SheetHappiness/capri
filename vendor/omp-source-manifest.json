@@ -9335,7 +9335,7 @@
     }
   },
   "additions": {
-    "UPSTREAM.md": "9cef4123ad6dfaead51a89d9de5d55763acec90570770b39dc1c09ab3fac67fb",
+    "UPSTREAM.md": "d1c00a4e821e09617727032cb4c06b2e80df9f272d7dd0d35865977c5a59e779",
     "packages/utils/test/capri-dirs.test.ts": "d4a2c1a0aa793d137bfb5a049b3a66a3d24ceba6e59434e0df28ae47439f0055",
     "packages/natives/test/capri-build.test.ts": "3034d7d7bc863b354baa7e8f4d1b88d7f6d51b611912d66275cc19a47a49ccd5"
   },
