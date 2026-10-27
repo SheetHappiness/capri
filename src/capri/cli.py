@@ -3,8 +3,7 @@ import argparse
 import asyncio
 import logging
 from pathlib import Path
-from .app import run
-from .guest_probe import run_guest_probe
+from .sdk_provenance import SdkProvenanceError, verify_sdk_provenance
 
 
 def main():
@@ -13,6 +12,11 @@ def main():
     parser.add_argument('--omp', type=Path, help='Override the bootstrapped <data>/bin/omp.exe')
     parser.add_argument('--guest-probe', choices=['answer', 'edit'], help='Telegram-only transport test; pauses DM service')
     args = parser.parse_args()
+    if not args.guest_probe:
+        try:
+            verify_sdk_provenance()
+        except SdkProvenanceError as error:
+            parser.error(str(error))
     data = args.data.resolve()
     executable = args.omp.resolve() if args.omp else data / 'bin/omp.exe'
     if not args.guest_probe and not executable.is_file():
@@ -23,9 +27,11 @@ def main():
     token = token_path.read_text(encoding='utf-8').strip()
     try:
         if args.guest_probe:
+            from .guest_probe import run_guest_probe
             logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)s %(message)s')
             asyncio.run(run_guest_probe(token, args.data.resolve(), phase=args.guest_probe))
         else:
+            from .app import run
             asyncio.run(run(token, executable, data))
     except KeyboardInterrupt:
         pass

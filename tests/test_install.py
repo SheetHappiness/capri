@@ -56,4 +56,7 @@ def test_fresh_offline_install_from_checkout_with_spaces_and_unicode(tmp_path):
     origin = json.loads(probe.stdout)
     assert origin["url"] == (checkout / "vendor/omp/sdk/python/omp-rpc").as_uri()
     assert "dir_info" in origin
+    subprocess.run([str(python), "-c",
+        "from capri.sdk_provenance import verify_sdk_provenance; verify_sdk_provenance()"],
+        cwd=checkout, env=env, check=True, capture_output=True)
     subprocess.run([str(python), "-m", "pip", "check"], env=env, check=True, capture_output=True)

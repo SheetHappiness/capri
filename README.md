@@ -193,6 +193,16 @@ python -m venv .venv
 
 Install from the checkout root. `requirements-runtime.txt` is the app-only
 alternative; `pip install -e .` alone does not establish SDK provenance.
+Normal CLI startup rejects an SDK whose installation metadata does not identify
+this checkout's `vendor/omp/sdk/python/omp-rpc` directory. After moving the
+checkout or installing the wrong SDK, reinstall from the checkout root:
+
+```powershell
+.venv/Scripts/python -m pip install -r requirements-runtime.txt
+```
+
+The guard runs before reading the bot token or importing the SDK-dependent app.
+`--help` and the Telegram-only `--guest-probe` do not require SDK provenance.
 OMP source is pinned to `45c35e40c46166dc726ccc52f5d27f40f2449f99` (18.12.6),
 archive SHA-256 `a8bbb85ede151ed58c100e84e6d239ca835937e04a51cd287049a9ff737fd4e2`.
 See [vendor provenance](vendor/omp/UPSTREAM.md) and
