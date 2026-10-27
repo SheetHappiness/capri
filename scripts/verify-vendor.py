@@ -17,6 +17,9 @@ def safe_path(name: str) -> bool:
 def generated(name: str) -> bool:
     """Ignore only known build/cache locations, never arbitrary source extensions."""
     parts = PurePosixPath(name).parts
+    if name in {"packages/natives/native/pi_natives.win32-x64-baseline.node",
+                "packages/natives/native/pi_natives.win32-x64-modern.node"}:
+        return True
     if any(p in {"node_modules", "__pycache__", ".pytest_cache", ".cache"}
            or p.endswith(".egg-info") for p in parts):
         return True

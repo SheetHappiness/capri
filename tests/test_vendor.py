@@ -86,6 +86,17 @@ def test_generated_sdk_and_build_outputs_do_not_change_source_provenance(tmp_pat
     assert verifier().verify(tmp_path, manifest) == []
 
 
+def test_generated_windows_addons_are_not_source_but_unknown_native_files_are(tmp_path):
+    tree, manifest = fixture(tmp_path)
+    for name in ("pi_natives.win32-x64-baseline.node", "pi_natives.win32-x64-modern.node"):
+        path = tree / "packages/natives/native" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"generated addon")
+    assert verifier().verify(tmp_path, manifest) == []
+    (path.parent / "unexpected.node").write_bytes(b"unrecorded")
+    assert verifier().verify(tmp_path, manifest) == ["extra source: packages/natives/native/unexpected.node"]
+
+
 def test_snapshot_has_pinned_provenance_licenses_locks_and_complete_hashes():
     path = ROOT / "vendor/omp-source-manifest.json"
     assert path.is_file(), "pinned snapshot manifest must exist"

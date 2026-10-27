@@ -20,9 +20,10 @@ current hash; `additions` covers this document and local tests. `records` hashes
   policy. Nested attributes disable CRLF conversion and LFS filtering, including
   in the apply-patch fixture directory. Ignore exceptions preserve upstream source
   files that upstream's own broad ignore rules would otherwise hide on import.
-- NOT APPLIED: `../omp-patches/0002-build-proof.patch` preserves Task 1's baseline
-  ISA override and Cargo `--locked` changes for Task 4. The actual build scripts
-  here remain byte-identical to upstream until their regression tests are added.
+- APPLIED: `../omp-patches/0002-build-proof.patch` carries Task 1's baseline
+  ISA override and Cargo `--locked` invocation into Task 4.
+  `packages/natives/test/capri-build.test.ts` exercises an AVX2 host override,
+  actual canonical addon installation/flags, and the N-API argv boundary.
 - APPLIED: `../omp-patches/0003-state-isolation.patch` adds the absolute
   `CAPRI_OMP_ROOT` hook in `packages/utils/src/dirs.ts` and regression tests in
   `packages/utils/test/capri-dirs.test.ts`. Missing/blank overrides retain upstream
@@ -56,5 +57,7 @@ Third-party Python dependencies/build backends can still need registry access.
 
 Capri still uses its existing executable path. Task 3 adds private source/runtime
 environment paths but does not rebuild, replace or restart the running bot.
-The old executable lacks the root hook. Build wrappers, compiled isolation
-acceptance and a clean-machine negative-dependency CI gate remain later tasks.
+The old executable lacks the root hook. Task 4 Step 2 adds a candidate-only build wrapper: verified snapshot copy,
+pinned toolchain, native build and staged exe. It does not smoke-test, promote
+or switch the runtime. Compiled isolation acceptance and the clean-machine
+negative-dependency CI gate remain later tasks.

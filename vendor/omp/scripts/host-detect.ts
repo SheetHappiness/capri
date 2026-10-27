@@ -69,6 +69,7 @@ export function detectHostMusl(): boolean {
 
 /** Detect whether this x86-64 host can run the modern AVX2 addon. */
 export function detectHostAvx2Support(): boolean {
+	if (process.env.PI_NATIVE_VARIANT === "baseline") return false;
 	if (process.arch !== "x64") return false;
 
 	if (process.platform === "linux") {

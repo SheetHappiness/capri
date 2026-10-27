@@ -3,7 +3,8 @@
 Date: 2026-10-27 (Europe/Warsaw).
 Scope: Task 1 only, as an isolated throwaway OMP build; no Capri integration.
 Status: Task 1 standalone Windows build proof PASS. Task 2 and Task 3 results
-are recorded below; build/promotion/runtime switch and clean CI remain pending.
+are recorded below, followed by Task 4 Step 2 candidate-only build evidence.
+Smoke/promotion/runtime switch, bootstrap and clean CI remain pending.
 Exact observed versions, source/patch/lock hashes and artifact metadata are in
 [`runtime-toolchain.json`](../../runtime-toolchain.json).
 
@@ -366,3 +367,127 @@ Task 2 convention: their required context prefix produces false positives for
 blank lines and tab indentation. All implementation/docs/tests pass
 `git diff --cached --check -- . ':!vendor/omp-patches/*.patch'`; patch bytes are
 instead hash-verified and checked for applicability, without rewriting context.
+
+## Task 4 Step 2 — candidate-only build (2026-10-27)
+
+Scope: build a Windows x64 candidate from the verified vendored snapshot.
+**No compiled CLI/RPC smoke, executable promotion, bootstrap, runtime switch,
+credential copy, session migration, Telegram calls or bot restart.** Task 4 is
+still incomplete: Steps 3–4 must smoke-test and promote a verified artifact.
+
+### Implementation and regression evidence
+
+- Applied the existing byte-preserved `0002-build-proof.patch`: forced baseline
+  host detection and N-API's Cargo `-- --locked`. Recorded both original/current
+  hashes, registered the regression test addition, and removed deferred status.
+- Three new Bun tests first failed on the intended assertions, then passed.
+  The tests force an AVX2 host in a fresh child, run the real native build driver
+  against a fake N-API compiler output, and assert actual canonical installation,
+  Rust flags and captured argv. They do not rely on source-text matching.
+- `scripts/build-runtime.ps1` verifies Python/local SDK origin and the exact
+  installed toolchain; initializes installed VS when needed; creates a unique
+  manifest-only source copy; uses frozen Bun install with scripts disabled;
+  builds native then Windows x64 executable; validates fresh outputs and source/
+  lock hashes; stages only `bin/omp.<run-id>.candidate.exe`. A per-Data OS file
+  lock protects shared build caches. Parent cwd/env, including missing versus
+  empty env keys, are restored even with dot-sourcing and failure.
+- Cargo/Bun cache, target and temp are private under Data. Source copy excludes
+  unlisted generated outputs. A narrow verifier extension recognizes the two
+  canonical Windows x64 generated addons; `unexpected.node` remains rejected.
+  Original manifest files are still hash-checked before generated-file handling.
+- Review found inherited compiler/wrapper/target selectors could bypass the
+  checked compiler. A poisoned-environment test reproduced RED; clearing those
+  overrides and pinning `CARGO_BUILD_TARGET=x86_64-pc-windows-msvc` made it GREEN.
+  VS batch-path quoting also has RED/GREEN coverage. VS environment capture is
+  used in memory and omitted from logs, with a private-value regression check.
+- Independent scoped read-only review finished with no remaining Critical,
+  Important or Minor findings. Review does not certify deferred runtime paths.
+
+### Reproduction and real candidate builds
+
+Prerequisites are preinstalled, not downloaded by the script. The prepared
+portable Bun and Rust toolchain from Task 1 were supplied as installed tools;
+their location is not hardcoded in production. Neither Task 1's OMP executable
+nor its native addon/build outputs were used as candidate inputs.
+
+From the checkout root in PowerShell 7:
+
+```powershell
+$env:RUSTUP_HOME = Join-Path (Get-Location) '.runtime/vendor-spike/tools/rustup'
+$env:PATH = (Join-Path (Get-Location) '.runtime/vendor-spike/tools/bun/bun-windows-x64-baseline') + ';' + (Join-Path (Get-Location) '.runtime/vendor-spike/tools/cargo/bin') + ';' + $env:PATH
+./scripts/build-runtime.ps1 -Data .runtime/t4s2
+```
+
+The first build used fresh private dependency/target caches. The second run used
+a separate verified snapshot and the same private caches, and exercised the
+final script after the review's compiler-selector/environment-log fixes.
+Registry dependencies are permitted; no OMP source/release/native leaf download
+is a substitute for the native/exe build.
+
+After the second build, the new Bun test harness alone was refactored to follow
+the nested OMP instructions: isolated `spyOn`, top-level imports and async Bun
+I/O. Its three failures were reproduced again with patch 0002 temporarily
+removed, then the patch was restored and all 47 focused Bun tests passed. No
+production source/recipe changed after the second build. Build records retain
+their original source-manifest hashes; reconstructing those manifests from the
+retained run snapshots confirms that only the test addition's hash differs from
+the final manifest. No historical build provenance was rewritten.
+
+| Run | Executable bytes | SHA-256 |
+|---|---:|---|
+| `141de497254c` | 243018240 | `fd97f6e4ec10a2fc84b89bfc6c519248b6125449f30cab4ab31ba88148cdafd3` |
+| `55aac4f29f3c` | 243018240 | `da3fa9bc6abafd478c70f397e759170e83afc99445f89729b8119c8f7cb31727` |
+
+Latest native addon SHA-256: `bf01b257d5a5869a70c8c534edfd8636369220b51f20ca43646300112612cf16`.
+Each staged exe hash was independently recomputed and matched its build record.
+Both unique candidates remain present. `.runtime/t4s2/bin/omp.exe` and
+`runtime-build.json` were absent afterward; there was no promotion. Synthetic
+auth/session/owner/Guest/config sentinel preservation is covered by the script
+tests, including successful candidate builds and failures.
+
+The exact toolchain remains Bun 1.4.4/revision 38afee6c8, Rust nightly-2026-10-06,
+MSVC toolset 14.44.35207/compiler 19.44.35229, Windows SDK 10.0.26100.0,
+CMake 4.4.4 and Ninja 1.12.1. Native uses profile ci, baseline/x86-64-v2,
+static CRT, eight Cargo jobs and locked dependencies. Per-run candidate records
+contain source/archive/manifest/patch/lock hashes, tool versions and artifact
+hashes; `runtime-toolchain.json` retains its historical Task 1 proof unchanged.
+
+The first native build finished in 5m40s and emitted LNK4217 warnings for
+Wasmtime/tree-sitter imports, the same warning family recorded in Task 1.
+Build success and native driver's own addon load probe are build evidence;
+the staged OMP executable has not been launched or smoke-tested here. Fresh
+source copies and cached builds are not bit-for-bit reproducibility or
+clean-machine/negative-dependency proof. Paths with spaces/Unicode are covered
+by stubbed script tests; real compiled worker long-path behavior remains Step 3.
+
+### Final automated verification
+
+```powershell
+$env:PYTHONUTF8 = '1'
+$env:CAPRI_INSTALL_WHEELHOUSE = Join-Path (Get-Location) '.runtime/vendor-spike/task2-wheelhouse'
+.venv/Scripts/python -m pytest -q --tb=short --basetemp=.runtime/t4s2-suite-final
+```
+
+Result: **300 passed, 6 expected future-step RED, no skips/warnings**, 154.57s.
+The offline local-SDK install test was enabled. Existing Step 1 contracts were
+retained rather than weakened to make a candidate-only pipeline appear complete.
+The six expected RED cases are:
+
+- `test_failed_stage_preserves_runtime_and_state[fail_smoke-expected_stages4]`
+- `test_failed_stage_preserves_runtime_and_state[smoke_timeout-expected_stages5]`
+- `test_build_overrides_inherited_flags_and_caches` (final full-stage assertion;
+  all build environment assertions run first)
+- `test_paths_and_caller_state[invoke-success]`
+- `test_paths_and_caller_state[dot-source-success]`
+- `test_build_command_contract`
+
+All six still require the omitted smoke stage; the complete pipeline success
+contract also requires later promotion. Dedicated Step 2 tests independently
+verify candidate staging, fresh/unique repeated runs, hostile inherited flags,
+relative/Unicode/space paths, VS setup and unchanged sentinel state.
+
+New native regressions plus the existing five isolation test files: **47 Bun
+tests passed, 0 failures**. Source verifier passed for 9,294 original source
+files and six recorded patched originals; reverse application check for 0002,
+whitespace checks and `pip check` passed. `git ls-files .runtime .venv` was empty.
+No bootstrap or production smoke script was created. Changes remain uncommitted.

@@ -157,6 +157,35 @@ temp. These paths cover managed runtime state, not arbitrary tool file writes.
 Source-only verification and its prerequisites are recorded in
 [`docs/verification/vendored-omp.md`](docs/verification/vendored-omp.md#task-3--private-runtime-state-2026-10-27).
 
+### Build a vendored candidate (Task 4 Step 2)
+
+Prepare the exact Windows x64 toolchain from `runtime-toolchain.json` on PATH
+and install the local Python requirements above. The script verifies Bun's
+version/revision, installed Rust nightly, MSVC/Windows SDK, CMake/Ninja and SDK
+origin. It can initialize an installed VS Developer environment; it does not
+install the system toolchain or download OMP source/binaries.
+
+```powershell
+pwsh -NoProfile -File ./scripts/build-runtime.ps1
+# Optional separate build data directory, relative to your launch cwd:
+pwsh -NoProfile -File ./scripts/build-runtime.ps1 -Data .runtime/build-check
+```
+
+The default Data is this checkout's `.runtime`. Each run copies only the
+hash-verified source manifest into `<data>/build/<run-id>/src`, installs frozen
+Bun dependencies without lifecycle scripts, builds the baseline native addon,
+then builds Windows x64 OMP. Cargo cache/target, Bun caches and temp stay under
+Data. Registries for third-party dependencies may be needed.
+
+Success creates `<data>/bin/omp.<run-id>.candidate.exe` and
+`<data>/build/<run-id>/candidate-result.json` with its provenance/hashes.
+This is **candidate-only**: no smoke, promotion, bootstrap or runtime switch.
+It leaves `<data>/bin/omp.exe`, its runtime metadata and existing Capri state
+untouched. The candidate is not yet accepted for running Capri; Steps 3–4
+must verify it and implement promotion. Build logs are ignored under the run
+directory; inherited compiler/wrapper/target overrides cannot select a different
+native compiler recipe, and caller environment/cwd are restored on exit.
+
 Create `.runtime/bot-token` locally, and log in with the official OMP flow using the same private agent directory:
 
 ```powershell
