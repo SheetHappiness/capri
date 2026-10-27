@@ -68,3 +68,11 @@
 ## Deliberately deferred
 
 Native-build CI, a new workflow trigger, fresh VM provisioning, authenticated Telegram acceptance, personality/soul integration, SDK packaging redesign, and any architecture cleanup. A full bootstrap rerun is not required by these Python/documentation changes; broaden verification only if implementation exposes a new build concern.
+
+## Execution record (2026-10-27)
+
+- Task 1: implemented in `92c57b3`; helper tests and CLI ordering/import regressions observed RED then GREEN. Uses `samefile()` and handles `read_text() is None` with the approved diagnostic.
+- Task 2: implemented in `4831dec`; only `additions.UPSTREAM.md` changed in the manifest. Source verification and 21 vendor tests passed.
+- Local final Python suite: 364 passed, 1 skipped (optional wheelhouse install); `pip check` passed. The offline installation case was also run separately with the existing wheelhouse.
+- Integration correction: the first actual PR-range `git diff --check main...HEAD` failed on preserved upstream whitespace and patch context (4782 diagnostic lines). Root `.gitattributes` disables whitespace checks only for the vendor snapshot and its patch records; the same gate then passed. Source bytes and hashes remain intact.
+- Environment: tests require execution outside this sandbox for normal temp access and Windows junction creation. No bot restart or authenticated runtime acceptance was performed.
