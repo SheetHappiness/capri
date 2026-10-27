@@ -66,13 +66,17 @@ def test_guest_unconfirmed_stop_blocks_next_child(tmp_path,outcome):
     asyncio.run(run())
 
 
-def test_guest_resume_isolation_and_public_text(tmp_path):
+def test_guest_resume_isolation_and_public_text(tmp_path, assert_private_omp_environment):
+    class CheckedSDK(GuestSDK):
+        def start(self):
+            assert_private_omp_environment(self.kw['env'], tmp_path)
+            return super().start()
     async def run():
         owner = tmp_path/'session.json'; owner.write_text('private pointer')
         transcript = tmp_path/'agent/sessions/owner.jsonl'
         transcript.parent.mkdir(parents=True); transcript.write_text('private transcript')
         before = [(p.read_bytes(),p.stat().st_mtime_ns) for p in (owner,transcript)]
-        engine = GuestEngine(tmp_path/'omp.exe',tmp_path,sdk_factory=GuestSDK)
+        engine = GuestEngine(tmp_path/'omp.exe',tmp_path,sdk_factory=CheckedSDK)
         for thread, resumed in [('a'*12,False),('a'*12,True),('b'*12,False)]:
             directory = tmp_path/'guest/sessions/17'/thread
             parts = [x async for x in engine.stream(directory,text='hello',reference_text='quoted secret')]

@@ -112,8 +112,18 @@ function readProfileFromEnvSafe(): string | undefined {
 	}
 }
 
-/** Profile-independent config root (~/.omp), shared by every omp profile. */
+/** Profile-independent root. Capri can supply a fully qualified private root. */
 export function getBaseConfigRoot(): string {
+	const override = process.env.CAPRI_OMP_ROOT?.trim();
+	if (override) {
+		// Windows isAbsolute also accepts drive-relative rooted paths (\foo).
+		// Require a drive or UNC share so child cwd/drive cannot change the target.
+		const qualified = process.platform !== "win32" || /^[a-z]:[\\/]|^[\\/]{2}[^\\/]+[\\/][^\\/]+/i.test(override);
+		if (!path.isAbsolute(override) || !qualified) {
+			throw new Error("CAPRI_OMP_ROOT must be a fully qualified absolute path");
+		}
+		return path.normalize(override);
+	}
 	return path.join(os.homedir(), getConfigDirName());
 }
 

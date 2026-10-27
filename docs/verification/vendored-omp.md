@@ -2,7 +2,8 @@
 
 Date: 2026-10-27 (Europe/Warsaw).
 Scope: Task 1 only, as an isolated throwaway OMP build; no Capri integration.
-Status: Task 1 standalone Windows build proof PASS. Tasks 2–6 remain unstarted.
+Status: Task 1 standalone Windows build proof PASS. Task 2 and Task 3 results
+are recorded below; build/promotion/runtime switch and clean CI remain pending.
 Exact observed versions, source/patch/lock hashes and artifact metadata are in
 [`runtime-toolchain.json`](../../runtime-toolchain.json).
 
@@ -146,7 +147,7 @@ source-changes.json,verified-rustflags.json}`. No production artifact was replac
 
 ## Later acceptance
 
-Task 2 results are recorded below; Tasks 3–6 remain pending. Task 6 must independently prove a
+Task 2/3 results are recorded below; Tasks 4–6 remain pending. Task 6 must independently prove a
 fresh Capri checkout with no global OMP, no pre-existing `~/.omp`, no upstream
 OMP GitHub downloads and no cached vendored build, followed by bootstrap, build,
 tests and local RPC smoke. Normal registry dependency downloads remain allowed.
@@ -228,3 +229,140 @@ Full upstream correctness is inherited from the pinned source, not audited here.
 Sandbox limitation: Python's Windows asyncio pipe setup stalls inside this
 sandbox before async test bodies. The unchanged baseline and acceptance suite
 were therefore run outside the sandbox. No product workaround was added.
+
+## Task 3 — private runtime state (2026-10-27)
+
+Scope: shared child environment, vendored source root hook, launcher regressions
+and auth-free **source** acceptance. No executable promotion, bot restart, model
+prompt, credential copy or session migration. The build-proof patch remains
+**NOT APPLIED**. Existing `.runtime/omp.exe` lacks the root hook, so these results
+must not be described as compiled-runtime or live Telegram acceptance.
+
+### Paths and write audit
+
+`data` is resolved at the Python call site. Directories are created before spawn;
+creation errors propagate. Only child overrides are returned; the parent env and
+real HOME/USERPROFILE are preserved. Owner, Guest and config get/set use this same
+builder. Profiles are explicitly empty and `PI_CONFIG_DIR=.capri-omp` is retained
+for old-executable compatibility. A nonblank CAPRI_OMP_ROOT is trimmed and must
+be fully qualified; Windows drive-relative/root-relative paths are rejected.
+
+| Managed state / trigger | Owning source / resolver | Target and evidence |
+|---|---|---|
+| Profile-independent root and install identity | utils `dirs.ts`, `getBaseConfigRoot`, `getInstallId` | `CAPRI_OMP_ROOT=<data>/omp-root`; UUID actually persisted in fresh source child |
+| Auth/settings DB, models DB, history, sessions | dirs `getAgentDbPath`, `getModelDbPath`, `getHistoryDbPath`, `getSessionsDir` | `PI_CODING_AGENT_DIR=<data>/agent`; fresh config/RPC startup created DBs, owner session path verified; no authenticated access exercised |
+| Owner pointer and Guest sessions | Capri engines / guest threads | Existing `session.json`, `agent/sessions`, `guest/sessions/<chat>/<thread>` retained; fake launch/resume/privacy tests |
+| Logs and stats | dirs `getLogsDir`, `getStatsDbPath` | `<data>/omp-root/logs`, `<data>/omp-root/stats.db`; log marker and source startup writes; Bun-test log fallback stays under private TEMP |
+| Daemons, global services, session ownership | dirs `getDaemonRuntimeRoot`, `getGlobalDaemonRuntimeRoot`, `getSessionOwnersDir` | `<data>/omp-root/run/...`; resolver assertions and auth-free startup; no separate daemon feature acceptance |
+| Native extraction | natives `loader-state.js`, `initLoaderContext`; dirs `getNativesDir` | `PI_NATIVES_DIR=<data>/cache/natives`; real resolver plus write marker. Source uses prepared same-pin addon; **new compiled extraction pending**. LOCALAPPDATA/omp is a loader search candidate, metadata unchanged |
+| Temp, worker sockets and stderr capture | utils `temp.ts`; subprocess `worker-client.ts`; worker-host smoke | `TEMP=TMP=<data>/tmp`; source worker smoke passed for short/Unicode paths. Long worker socket fails explicitly; no global fallback |
+| Plugins / marketplaces and managed JS environments | `extensibility/plugins/{manager,bun-cli,bun-git-cache}.ts`, `eval/js/package-installer.ts` | Resolver targets under root/plugins or agent/cache/eval-js; Bun subprocesses inherit env. Added `BUN_INSTALL_CACHE_DIR=<data>/cache/bun` after audit found default home cache. Actual `bun pm cache` resolves there; registry/git install and lifecycle scripts **static-only** |
+| Bun runtime transpiler cache | Bun 1.4.4 source execution and dynamic TS imports | `BUN_RUNTIME_TRANSPILER_CACHE_PATH=<data>/cache/transpiler`; conflicting inherited override reproduced by reviewer and fixed. Final probe executes cacheable local TS and asserts a real private `.pile` file. Parent probe cache must be disabled **before invocation** |
+| Transformers, fastembed, browser, grammars, model downloads | utils `runtime-install.ts`, dirs `getTinyWorkerRuntimeDir`, `getFastembedRuntimeDir`, `getPuppeteerDir`, `getNativeGrammarsDir`, `getTinyModelsCacheDir` | Managed destinations under root or agent cache, Bun installer inherits private cache. Downloads and optional packages **static-only**, not exercised |
+| Python managed venv/gateway | dirs `getPythonEnvDir`, `getPythonGatewayDir`; `eval/py/runtime.ts` | root/python-env, agent/python-gateway; resolver evidence only. External uv/pip installers and their own caches are outside this runtime-only acceptance |
+| Runtime update | main `checkForNewVersion`, `cli/update-cli.ts`, `cli/build-service.ts` | Source checkout skips binary update check; startup check is a notification path, executable update is explicit CLI. No update command or download run. Compiled check/install paths require Task 4/5 review and acceptance |
+| Marketplace refresh | main `scheduleMarketplaceAutoUpdate`, plugins `marketplace-auto-update.ts` | Root/agent registry/cache helpers; fresh source startup has no installed marketplaces. Network updates with existing registries **static-only** |
+| Discovery / project-generated files | `config.ts`, discovery helpers, dirs project helpers | Capri's existing disabled providers/flags retained. HOME/.env and discovery may be read; project tool writes and explicit user-selected external paths are not a filesystem sandbox |
+
+The additional Bun cache overrides are audit-driven extensions to the plan's
+initial environment table; it uses Bun's existing supported override rather than
+patching installers. No lockfile/dependency source or capability policy changed.
+Build/Cargo caches belong to Task 4, not this runtime environment builder.
+
+### Source harness and reproducible commands
+
+Bun **1.4.4 (38afee6c8)** and prepared native addon from the same pinned source
+were reused from Task 1. The addon SHA-256 is
+`b415765948e79603ce877a671830eaf6caec80a34c234b38f8bbc85717171371`;
+it was staged beside the ignored portable Bun executable, a supported native
+loader candidate, without placing a binary in tracked source. This is source
+harness preparation, not a new build or a clean-machine proof.
+
+From `vendor/omp`, with the pinned Bun on PATH **for this shell only**:
+
+```powershell
+# Disable the parent Bun transpiler cache before it parses the generator/probe.
+# OMP children receive a separate prepared private cache from omp_environment.
+$env:BUN_RUNTIME_TRANSPILER_CACHE_PATH = '0'
+# BUN_INSTALL_CACHE_DIR and BUN_TMPDIR must point at ignored local scratch dirs.
+bun install --frozen-lockfile --ignore-scripts
+bun packages/collab-web/scripts/build-tool-views.ts
+bun test packages/utils/test/capri-dirs.test.ts packages/utils/test/dirs.test.ts packages/utils/test/profiles.test.ts packages/utils/test/install-id.test.ts packages/utils/test/natives-dir-override.test.ts
+bun ../../scripts/probe-omp-isolation.ts <absolute-unused-short-path-below-checkout-.runtime>
+```
+
+The generator creates one ignored `tool-views.generated.js` needed for raw-source
+CLI imports (normally root install `prepare`). It is a temporary harness asset,
+not part of the pinned snapshot; remove it after source probes before running
+source provenance verification. No Task 4 build wrapper or build patch is needed.
+The probe uses `.venv/Scripts/python.exe` and Capri's actual environment builder,
+then installs that env before importing OMP in a fresh child. It rejects relative
+paths, the active agent tree, nonempty scratch roots and junction escapes. Logs
+remain ignored inside disposable data; only summarized booleans are printed.
+It submits **no prompt**. RPC requests `get_state`, checks model/session location,
+closes stdin and confirms the child's exit code; timed-out/forced exits fail.
+
+The exact portable Bun used here is at
+`.runtime/vendor-spike/tools/bun/bun-windows-x64-baseline/bun.exe`.
+Final source probes use `.runtime/p3f` and `.runtime/Проба дані 4` as new roots;
+private summaries/logs stay there and in `.runtime/task3`.
+
+| Case | Observed result |
+|---|---|
+| Shared environment RED/GREEN | 8 initial failures, then 11 PASS; cache extension separately 7 failures, then 11 PASS |
+| New root-hook RED/GREEN | 8 assertion failures before hook; 11 new tests PASS after hook |
+| Focused new/upstream Bun tests | 44 PASS, 0 fail across 5 files |
+| Owner / Guest / permission get+set boundary | 42 PASS; inherited conflicting roots/profiles/temp/cache overridden before fake start |
+| Source config CLI, short and Unicode/space roots | PASS; JSON key/value validated |
+| Source worker `--smoke-test`, short and Unicode/space roots | PASS, exit 0 |
+| Auth-free source RPC, both roots | PASS, exact openai-codex/gpt-6-luna, session under private agent/sessions, stdin-close exit 0 |
+| Install ID, native/log/temp writes, Bun install-cache resolver and runtime transpiler `.pile` | PASS from fresh source child |
+| Home-directory metadata snapshots | Unchanged for `.omp`, `.capri-omp`, LOCALAPPDATA/omp in both passing probes |
+| Long data root (100-character leaf suffix) | Expected limitation reproduced: worker exit 1 with ENAMETOOLONG; config and RPC still passed, child exit confirmed; overall probe correctly exits 1 |
+
+Observation is limited to recursive size/mtime/mode inventories of the three
+known directories, without reading their contents. No process file-write tracer
+was available/used. Snapshots cannot exclude transient writes or writes at an
+unlisted location; they are evidence of these runs, not an exhaustive syscall
+audit. Optional downloads/installers, auth, arbitrary tools and compiled runtime
+remain explicitly untested. Use a short checkout/data path on Windows; do not
+silently redirect long private TEMP into global temp.
+
+Bun install required execution outside the Windows sandbox after local-temp
+EBADF. Python async tests also needed execution outside the sandbox because pipe
+setup stalls before test bodies (same Task 2 limitation); no product workaround
+was introduced. Python tests use repository-local `--basetemp`.
+
+Final automated verification: **271 passed, 1 opt-in skipped** in 81.67s; the
+skipped fresh-venv/offline install test was then enabled separately with the
+existing Task 2 wheelhouse and **passed** in 24.88s (**272 distinct tests passed**).
+The verifier passed for 9,294 original source files / four patched originals.
+`git apply --reverse --check` passed for applied patch 0003;
+`git apply --check` passed for unapplied build patch 0002; `git diff --check`
+passed. Lockfiles, build-proof source files, toolchain manifest and executable
+were unchanged. Probe refusal checks for relative/active/nonempty data all
+returned exit 1 with their expected guard message.
+
+Independent final review found one Important issue and no Critical/Minor issues:
+an inherited `BUN_RUNTIME_TRANSPILER_CACHE_PATH` escaped the private data root.
+The pinned Bun reproduced a real `.pile` outside private data. Seven regression
+assertions failed before the fix, then all 11 environment tests passed. Capri now
+prepares `<data>/cache/transpiler` and overrides that variable for every launcher.
+The final source probe additionally executes cacheable local TypeScript and
+observes a private `.pile`. The parent Bun invocation disables its cache before
+entry; setting env inside the probe would be too late for its own transpilation.
+Both passing source cases and the expected long-socket failure were repeated
+after the fix. Final focused Bun tests: **44 passed, 0 failed**.
+No second review was dispatched; the single fix pass uses RED/GREEN and the full
+suite. Compiled/runtime promotion, auth/live acceptance, external installers and
+non-Windows XDG remain the explicitly documented deferred scope.
+
+Final verification after the review fix, with the offline install test enabled
+in the same full run: **272 passed in 30.82s, no skips**. Source verifier,
+applied/unapplied patch applicability checks and whitespace checks passed again.
+
+Staged whitespace validation excludes unified-diff patch records, matching the
+Task 2 convention: their required context prefix produces false positives for
+blank lines and tab indentation. All implementation/docs/tests pass
+`git diff --cached --check -- . ':!vendor/omp-patches/*.patch'`; patch bytes are
+instead hash-verified and checked for applicability, without rewriting context.

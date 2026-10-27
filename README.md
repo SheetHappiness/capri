@@ -144,6 +144,19 @@ SDK before resolving Capri. `pip install -e .` alone does not establish SDK
 provenance. The vendored source import has not switched the executable yet;
 the existing `.runtime/omp.exe` remains in use until the later runtime task.
 
+Capri now prepares absolute private paths before owner, Guest and permission CLI
+startup: `<data>/agent`, `<data>/omp-root`, `<data>/cache/natives`,
+`<data>/cache/bun`, `<data>/cache/transpiler` and `<data>/tmp` (`--data` defaults to `.runtime`). Profiles are
+cleared for these children; `HOME` and `USERPROFILE` retain their real values.
+The vendored source understands `CAPRI_OMP_ROOT=<data>/omp-root`; the existing
+binary does **not** contain this hook and still uses the `.capri-omp` home-root
+fallback. Full binary isolation needs the later rebuild and acceptance gate.
+Keep the checkout/data path short on Windows: long `<data>/tmp` paths can fail
+worker socket creation with `ENAMETOOLONG`; Capri does not fall back to global
+temp. These paths cover managed runtime state, not arbitrary tool file writes.
+Source-only verification and its prerequisites are recorded in
+[`docs/verification/vendored-omp.md`](docs/verification/vendored-omp.md#task-3--private-runtime-state-2026-10-27).
+
 Create `.runtime/bot-token` locally, and log in with the official OMP flow using the same private agent directory:
 
 ```powershell

@@ -9317,14 +9317,21 @@
       "original_sha256": "ad79e057f77d4cccfc943dd711c385bff44b7a04650fe63cc2a7fd5b2a653f47",
       "current_sha256": "ff58bdbee77c030670ffc4d646152219b0fa69253c5e5c078a3ab9fb3fbbc4a9",
       "patch_file": "omp-patches/0001-checkout-policy.patch"
+    },
+    "packages/utils/src/dirs.ts": {
+      "original_sha256": "2d423f4f18e5ed0c25cd4887c68cf2fea704f1615ad4c85846ae5c10d3207f24",
+      "current_sha256": "a1c357496528ccf0380dac3df78f4ddd0fad0d280e358ad01ca2e9f7fa7d734a",
+      "patch_file": "omp-patches/0003-state-isolation.patch"
     }
   },
   "additions": {
-    "UPSTREAM.md": "efaee4347fbcf5b557963d3f683031a91c31a13a44e2d2aa24ad35b7469b4f95"
+    "UPSTREAM.md": "c33e9316913ead48f4e2216b9cf383ccc299d0d70ae28a35be2c601e66438efb",
+    "packages/utils/test/capri-dirs.test.ts": "d4a2c1a0aa793d137bfb5a049b3a66a3d24ceba6e59434e0df28ae47439f0055"
   },
   "records": {
     "omp-patches/0001-checkout-policy.patch": "e1de6bfcbc5c954a20fce5bdb4d2ffd5e35988f129065a2918e2515a9a08b12e",
-    "omp-patches/0002-build-proof.patch": "67da5b42c29b1f6b2f929f6c2a095638369db132028be27da1653a75496b36cf"
+    "omp-patches/0002-build-proof.patch": "67da5b42c29b1f6b2f929f6c2a095638369db132028be27da1653a75496b36cf",
+    "omp-patches/0003-state-isolation.patch": "369e9fc1894342b6977b372fc3775b7ae27e22146be763475be224b3c2a666bd"
   },
   "deferred_patches": [
     {

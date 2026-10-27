@@ -14,7 +14,7 @@
 
 `../omp-source-manifest.json` records the SHA-256 of every original archive file.
 Its `patches` records bind each applied modification to both its original and
-current hash; `additions` covers this document. `records` hashes the patch files.
+current hash; `additions` covers this document and local tests. `records` hashes the patch files.
 
 - APPLIED: `../omp-patches/0001-checkout-policy.patch` changes only Git checkout
   policy. Nested attributes disable CRLF conversion and LFS filtering, including
@@ -23,8 +23,14 @@ current hash; `additions` covers this document. `records` hashes the patch files
 - NOT APPLIED: `../omp-patches/0002-build-proof.patch` preserves Task 1's baseline
   ISA override and Cargo `--locked` changes for Task 4. The actual build scripts
   here remain byte-identical to upstream until their regression tests are added.
+- APPLIED: `../omp-patches/0003-state-isolation.patch` adds the absolute
+  `CAPRI_OMP_ROOT` hook in `packages/utils/src/dirs.ts` and regression tests in
+  `packages/utils/test/capri-dirs.test.ts`. Missing/blank overrides retain upstream
+  behavior; nonempty relative or drive-relative paths fail before root writes.
+  The explicit agent/session directory is preserved. Supported scope: Windows x64.
 
-No dependency cleanup or runtime behavior changes are part of this import.
+No dependency cleanup is part of this import. Task 3's root hook is the only
+local runtime behavior change; without its environment override it is inactive.
 The original `LICENSE`, `THIRD-PARTY-NOTICES.txt`, SDK licenses and all other
 license/notice files remain in place. The source archive's LFS pointer files,
 if present, remain exactly as archived; this import does not fetch LFS objects.
@@ -48,6 +54,7 @@ does not establish SDK provenance and is not the supported installation path.
 Do not substitute an arbitrary package-index distribution of the same version.
 Third-party Python dependencies/build backends can still need registry access.
 
-Capri still uses its existing executable path in Task 2. This source import does
-not rebuild, replace or launch the running bot/runtime. Build wrappers, local
-state paths and a clean-machine negative-dependency CI gate are later tasks.
+Capri still uses its existing executable path. Task 3 adds private source/runtime
+environment paths but does not rebuild, replace or restart the running bot.
+The old executable lacks the root hook. Build wrappers, compiled isolation
+acceptance and a clean-machine negative-dependency CI gate remain later tasks.
