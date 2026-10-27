@@ -87,5 +87,39 @@
     "--version",
     "--help",
     "--smoke-test"
-  ]
+  ],
+  "system_toolchain_policy": {
+    "required": "Visual Studio 2022 C++ Build Tools x64 with compatible Windows SDK",
+    "proof_fields_are_evidence_only": [
+      "msvc_toolset_directory",
+      "msvc_compiler",
+      "windows_sdk"
+    ]
+  },
+  "downloads": {
+    "bun": {
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-windows-x64-baseline.zip",
+      "sha256": "0f20ce6674d4f2dbcc8c5d59fdf99f7ba45f8c3b367e0f5781cbfa30a1c78d99",
+      "executable": "bun-windows-x64-baseline/bun.exe",
+      "version": "1.4.4",
+      "revision": "38afee6c8"
+    },
+    "cmake": {
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-windows-x86_64.zip",
+      "sha256": "bace36e94b31c68ab6fa295f26dfa11219e0701cf7c94b0284a7d1cb13dac536",
+      "executable": "cmake-4.4.4-windows-x86_64/bin/cmake.exe",
+      "version": "4.4.4"
+    },
+    "ninja": {
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip",
+      "sha256": "f550fec705b6d6ff58f2db3c374c2277a37691678d6aba463adcbb129108467a",
+      "executable": "ninja.exe",
+      "version": "1.12.1"
+    },
+    "rustup": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-pc-windows-msvc/rustup-init.exe",
+      "sha256": "00f139da614dced87d3c3d4121c43eebdac3c1bf8a5ee86b9d80dfd71c8d70fd",
+      "version": "1.29.2"
+    }
+  }
 }

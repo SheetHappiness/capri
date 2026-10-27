@@ -491,3 +491,150 @@ tests passed, 0 failures**. Source verifier passed for 9,294 original source
 files and six recorded patched originals; reverse application check for 0002,
 whitespace checks and `pip check` passed. `git ls-files .runtime .venv` was empty.
 No bootstrap or production smoke script was created. Changes remain uncommitted.
+
+## Clean-machine bootstrap A — implementation and local acceptance (2026-10-27)
+
+This section supersedes the candidate-only scope of Task 4 Step 2 and the old
+Tasks 4–6 plan. The implementation follows
+[`2026-10-27-clean-machine-bootstrap.md`](../superpowers/plans/2026-10-27-clean-machine-bootstrap.md).
+The historical proof above remains unchanged.
+
+### Supported setup
+
+Required system components: Windows x64, PowerShell 7 x64, Python 3.14 x64, Git,
+and VS2022 C++ Build Tools x64 with compatible Windows SDK headers/libraries/rc.
+Exact MSVC/compiler/SDK patch versions are **recorded evidence only**.
+Bootstrap downloads pinned Bun 1.4.4 baseline, Rust nightly-2026-10-06 via
+rustup 1.29.2, CMake 4.4.4 and Ninja 1.12.1 to `<data>/tools`.
+
+Download hashes were obtained from the official Bun/CMake release asset metadata,
+the official Ninja v1.12.1 release ZIP, and Rust's versioned rustup-init plus its
+published SHA-256 file. Actual tool installation verified all pinned hashes and
+versions. URLs and hashes are retained in `runtime-toolchain.json`.
+Incomplete `.tmp` downloads start over; version-invalid existing tool directories
+are reported without deleting them. No new bootstrap lock/recovery system exists.
+The existing build-cache lock remains.
+
+Bootstrap creates/checks `.venv`, installs the supported requirements from the
+checkout root, checks SDK `direct_url.json`, verifies vendored source, then builds
+native/exe from a new manifest-only snapshot. Smoke uses a fresh private scratch,
+System32-only PATH and an environment allowlist without ambient provider keys.
+It runs CLI/version/help, worker smoke, isolated config and `RpcClient.get_state()`
+without a prompt, login, credential copy or Telegram call. It requires true SDK
+stop confirmation and fresh embedded baseline addon extraction. Build checks all
+smoke booleans, executable and native hashes, then replaces final in one
+same-volume operation. CLI defaults to `<data>/bin/omp.exe`; explicit `--omp`
+remains supported and Telegram-only guest probe needs no runtime.
+
+### Automated and integration evidence
+
+The existing build harness still executes the real build script; only external
+tools and the expensive smoke subprocess are doubled. It now covers complete
+publication, missing/wrong tools, synthetic newer MSVC/SDK acceptance and actual
+version recording, absent SDK diagnostic, failed stages and smoke timeout,
+changed candidate, false smoke evidence, locked final, source/lock drift,
+Unicode/space/relative Data and caller env/cwd restoration. Old final bytes and
+synthetic owner/Guest/auth/config sentinels are preserved on failures.
+
+Bootstrap tests execute the real entry point and archive installer with local
+fixtures. They cover SHA mismatch before extraction/execution, incomplete `.tmp`
+retry, private version selection/reuse, prerequisites before downloads, vendored
+SDK origin, vendor-Data rejection before writes, sequential rerun and state/env
+preservation. A dedicated failure regression caught absent Rust env keys being
+restored as empty values; they are now explicitly removed when previously absent.
+
+Smoke tests require confirmed teardown, fail on timeout/nonempty scratch/long
+socket paths, inspect the private environment and cover legacy Windows stdout
+with Unicode Data. Real Unicode smoke first exposed an encode failure only in
+the success message; the message is now ASCII-safe and the real repeat passed.
+
+Commands (test scratch/logs remain ignored under `.runtime`):
+
+```powershell
+$env:PYTHONUTF8 = '1'
+$env:CAPRI_INSTALL_WHEELHOUSE = Join-Path (Get-Location) '.runtime/vendor-spike/task2-wheelhouse'
+.venv/Scripts/python -m pytest -q --basetemp=.runtime/bs-full-release
+./tests/verify-bootstrap-tools.ps1 -Data .runtime
+.venv/Scripts/python scripts/verify-vendor.py --root .
+.venv/Scripts/python -m pip check
+git diff --check
+./scripts/bootstrap.ps1
+```
+
+The opt-in fresh-venv offline install test was explicitly enabled using the
+existing third-party wheelhouse; it verifies a checkout with spaces/Unicode and
+rejects a registry replacement for the vendored SDK. With legacy parent encoding
+it initially passed with a subprocess decoding warning; the UTF-8 run is the
+reported acceptance run.
+
+`tests/verify-bootstrap-tools.ps1`: **PASS**. Real private rustc and Cargo remain
+usable after `CARGO_HOME` switches to `<data>/cache/cargo`, while RUSTUP_HOME stays
+under tools. A real metadata compilation succeeded through the installed Rust
+proxy. The helper restored caller env before that check.
+Source verifier: **PASS**, 9,294 upstream files / six recorded patches.
+`pip check` and whitespace checks: **PASS**.
+Independent read-only review completed; its real-Rust regression gap was covered
+by the opt-in integration script. Vendor descendant rejection also has a direct
+before-writes regression; the separator expression is explicit.
+
+### Real default bootstrap
+
+The real bootstrap completed successfully in this prepared Windows checkout.
+Local tool installation used a new ignored tool directory, then those verified
+tools were moved into the default Data tools directory. The full source build
+used default `.runtime`, a fresh source snapshot and a new private Cargo target;
+it did not reuse a previous OMP executable/native artifact. This is local
+acceptance, not clean-Windows proof.
+
+First successful run: `.runtime/build/ce691028ade4/candidate-result.json`.
+Published: `.runtime/bin/omp.exe`, 243,025,408 bytes.
+
+- Executable SHA-256: `0c5f184cc950693fa4b0773db5e0a3a05ae32e20b02d3485164a4cc936e88862`.
+- Native addon SHA-256: `289311ce3794c17d9e141cc75f94d8666121f4fb0087ae29464c569342aba1ad`.
+- Source manifest SHA-256: `9acdf8d417e9ebb05adcd3f8be850d3140055470e371c2098d153bff6c46b00c`.
+- Actual Python 3.14.7; Bun 1.4.4+38afee6c8; Rust/Cargo exact pinned versions;
+  MSVC toolset 14.44.35207 / compiler 19.44.35229; SDK 10.0.26100.0;
+  CMake 4.4.4; Ninja 1.12.1.
+- Native compile completed in 6m27s with the previously observed LNK4217 linker
+  warnings. Build, embedded extraction, worker and auth-free RPC passed; this
+  does not certify all native features.
+- Smoke: `.runtime/s/ce69/smoke-result.json`, all checks true, hashes matched.
+- Final SHA matched the build report; all five preexisting watched private state
+  files retained their bytes. No login, model prompt or bot restart occurred.
+
+Additional real auth-free smoke passed with fresh default and Unicode/space
+scratch (`.runtime/sm2`, `.runtime/Я 2`). An overlong scratch was rejected with
+an actionable shorter-Data error before launch. Build harness covers arbitrary
+Unicode/space source paths; a real native source build from a Unicode checkout
+was not performed here.
+
+### Final verification and sequential repeat
+
+Final full suite: **335 passed, 0 failed, 0 skipped** in 198.16s, including the
+opt-in fresh-venv offline install. Log: `.runtime/bootstrap-full-release.log`.
+The final SDK/CLI diagnostic regressions are included in this run.
+
+A second complete `./scripts/bootstrap.ps1` succeeded with existing private tools
+and caches: run `54e7a0aa03f7`. Native recompile completed in 3m15s; the fresh
+source snapshot, native/exe builds, all smoke stages and replacement passed again.
+Current `.runtime/bin/omp.exe` is 243,024,896 bytes with SHA-256
+`d35d7b7bd8517d8b4fafe8158186e569af8020a7223e1ac2777ecac315749191`;
+its native SHA-256 is
+`4562ba77d34b214fd4a3dd1c7edd940ab021e18a77d45a844ed6de02f338b301`.
+Different hashes from the first build reinforce that the contract is a pinned
+procedure/provenance and successful acceptance, not byte-identical output.
+
+The repeat was dot-sourced into its caller. Exact env key/value set and cwd
+matched afterward. Hashes of all five watched preexisting private state files
+were unchanged across both builds. Result: `.runtime/bootstrap-repeat-result.json`;
+smoke: `.runtime/s/54e7/smoke-result.json`. No bot restart occurred.
+
+### Remaining acceptance boundaries
+
+- Disposable clean Windows VM/fresh clone acceptance: **pending**, no clean VM
+  was available. A prepared host/fresh tool or scratch directory does not prove it.
+- Genuine newer VS2022/SDK native build: **pending**; synthetic compatibility
+  contracts pass, while the installed real system toolchain matches old proof.
+- Authenticated owner/Guest replies, permissions, `/stop`, restart/session resume
+  with this newly built executable: **not run**. Bootstrap intentionally does not
+  invoke those flows; historical acceptance of earlier runtime remains historical.

@@ -118,84 +118,108 @@ An unfinished reserved token prefix at stream end is discarded; nonmatching text
 Whitespace-only bubbles are ignored. There are no artificial delays or later attention-seeking
 messages. Future sticker/PC actions still need a separate ordered tool integration.
 
-## Exact dependencies / reproducibility
+## Clean-machine bootstrap (Windows x64)
 
-- Python used here: 3.14.7. Python 3.14 is required.
-- OMP binary: 18.12.6 Windows x64, release commit `45c35e40c46166dc726ccc52f5d27f40f2449f99`.
-- SHA-256: `73d73c11dc8821cf939441a964992aefc9c5b0d5a4418e9e8985a46439b60eef`.
-- Binary metadata: https://build.stencil.so/api/products/omp/versions/18.12.6/windows-x86_64
-- Official SDK source: `vendor/omp/sdk/python/omp-rpc` at that exact commit; SDK version 0.1.0 is NOT sufficient provenance by itself.
-- SDK source archive SHA-256: `a8bbb85ede151ed58c100e84e6d239ca835937e04a51cd287049a9ff737fd4e2`.
-  The complete source is included under `vendor/omp`; no OMP SDK download is needed.
-  [Provenance and local patches](vendor/omp/UPSTREAM.md) are checked with
-  `python scripts/verify-vendor.py --root .`.
-- aiogram: 3.31.0. No global OMP or Bun required.
+Install these system prerequisites manually:
 
-For a new checkout, download and hash-check that binary into `.runtime/omp.exe`, then:
+- Git and PowerShell 7 x64.
+- Python 3.14 x64, available as `python` on PATH.
+- Visual Studio 2022 C++ Build Tools with the x64 compiler/linker and a compatible
+  Windows SDK (headers, x64 libraries and resource compiler).
+
+Then, from PowerShell 7 in a fresh checkout:
+
+```powershell
+git clone <your-Capri-repository-url> CapriCorn
+cd CapriCorn
+./scripts/bootstrap.ps1
+.venv/Scripts/python -m capri.cli
+```
+
+Before starting Capri for the first time, create `.runtime/bot-token` locally and
+complete the private OMP login described below. Bootstrap does not log in, run a
+model prompt or start/restart the bot. Missing prerequisites produce a diagnostic;
+bootstrap does not install Visual Studio, Python or other system components.
+
+Bootstrap creates or checks the checkout's `.venv`, installs
+`requirements-test.txt` including `vendor/omp/sdk/python/omp-rpc`, verifies SDK
+origin and source provenance, and installs these exact private tools from
+`runtime-toolchain.json`: Bun 1.4.4 baseline, Rust nightly-2026-10-06 via rustup
+1.29.2, CMake 4.4.4 and Ninja 1.12.1. They live under `.runtime/tools`; user PATH
+and user Rust roots are unchanged. Network access to official tool releases and
+Python/Bun/Cargo dependency registries is required.
+
+MSVC 14.44.35207 / compiler 19.44.35229 and SDK 10.0.26100.0 are the **recorded
+build proof**, not required patch versions. The build checks VS2022 x64 and SDK
+components, records the actual versions, and verifies native build and smoke.
+The procedure and inputs are pinned; executable hashes may differ between builds.
+
+The build uses a fresh manifest-only source copy, frozen Bun lockfile and locked
+Cargo build. Before publication it checks `--version`, `--help`, worker smoke,
+private configuration, auth-free SDK `get_state()`, embedded baseline native
+extraction and confirmed `stop()`. Only then does one same-volume replacement
+install `.runtime/bin/omp.exe`. A build/smoke failure preserves the previous final
+executable and existing owner/Guest/auth/config state. If final is in use, stop
+the bot manually and rerun; bootstrap never kills it. No mandatory metadata
+sidecar is needed to launch Capri.
+
+Run one bootstrap at a time. Repeated sequential runs reuse verified tools and
+build caches. Downloads use `.tmp`, SHA-256 verification and staging before
+rename; incomplete downloads are downloaded again. A foreign/incompatible
+`.venv` or existing wrong tool directory is reported without deleting it.
+Private logs and per-run build/smoke evidence remain under Data.
+
+```powershell
+# Data is relative to the launch directory, or an absolute path:
+./scripts/bootstrap.ps1 -Data C:/CapriData
+.venv/Scripts/python -m capri.cli --data C:/CapriData
+# Manual runtime override, if needed:
+.venv/Scripts/python -m capri.cli --omp C:/Somewhere/omp.exe
+```
+
+Keep checkout/Data paths short: Windows worker sockets have a strict byte limit.
+Smoke rejects an overlong path with a request to shorten Data, without falling
+back to global temp. Space/Unicode paths work within this limit.
+The default runtime is `<data>/bin/omp.exe`; there is no global OMP fallback.
+The Telegram-only `--guest-probe` still needs no OMP executable.
+
+For Python-only development, source builds are unnecessary:
 
 ```powershell
 python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-test.txt
+.venv/Scripts/python scripts/verify-vendor.py --root .
 ```
 
-For application dependencies only, use `requirements-runtime.txt`. Run both
-requirements commands from the checkout root: they explicitly install the local
-SDK before resolving Capri. `pip install -e .` alone does not establish SDK
-provenance. The vendored source import has not switched the executable yet;
-the existing `.runtime/omp.exe` remains in use until the later runtime task.
+Install from the checkout root. `requirements-runtime.txt` is the app-only
+alternative; `pip install -e .` alone does not establish SDK provenance.
+OMP source is pinned to `45c35e40c46166dc726ccc52f5d27f40f2449f99` (18.12.6),
+archive SHA-256 `a8bbb85ede151ed58c100e84e6d239ca835937e04a51cd287049a9ff737fd4e2`.
+See [vendor provenance](vendor/omp/UPSTREAM.md) and
+[build/acceptance evidence](docs/verification/vendored-omp.md).
 
-Capri now prepares absolute private paths before owner, Guest and permission CLI
-startup: `<data>/agent`, `<data>/omp-root`, `<data>/cache/natives`,
-`<data>/cache/bun`, `<data>/cache/transpiler` and `<data>/tmp` (`--data` defaults to `.runtime`). Profiles are
-cleared for these children; `HOME` and `USERPROFILE` retain their real values.
-The vendored source understands `CAPRI_OMP_ROOT=<data>/omp-root`; the existing
-binary does **not** contain this hook and still uses the `.capri-omp` home-root
-fallback. Full binary isolation needs the later rebuild and acceptance gate.
-Keep the checkout/data path short on Windows: long `<data>/tmp` paths can fail
-worker socket creation with `ENAMETOOLONG`; Capri does not fall back to global
-temp. These paths cover managed runtime state, not arbitrary tool file writes.
-Source-only verification and its prerequisites are recorded in
-[`docs/verification/vendored-omp.md`](docs/verification/vendored-omp.md#task-3--private-runtime-state-2026-10-27).
+`build-runtime.ps1 -Data <path>` is also available with the pinned tools already
+prepared on PATH and the local Python requirements installed. Bootstrap supplies
+that environment automatically. Build logs and source snapshots are under
+`<data>/build/<run-id>`; `candidate-result.json` records actual tool versions,
+hashes, smoke evidence and publication. The existing per-Data build lock protects
+shared build caches; the installer adds no concurrent-bootstrap protocol.
 
-### Build a vendored candidate (Task 4 Step 2)
-
-Prepare the exact Windows x64 toolchain from `runtime-toolchain.json` on PATH
-and install the local Python requirements above. The script verifies Bun's
-version/revision, installed Rust nightly, MSVC/Windows SDK, CMake/Ninja and SDK
-origin. It can initialize an installed VS Developer environment; it does not
-install the system toolchain or download OMP source/binaries.
+To log in with the newly built executable and the same private roots used by
+Capri, use a child PowerShell so these environment values do not persist:
 
 ```powershell
-pwsh -NoProfile -File ./scripts/build-runtime.ps1
-# Optional separate build data directory, relative to your launch cwd:
-pwsh -NoProfile -File ./scripts/build-runtime.ps1 -Data .runtime/build-check
+pwsh -NoProfile -Command {
+    $data = (Resolve-Path .runtime).Path
+    $setup = .venv/Scripts/python -c 'import json; from pathlib import Path; from capri.config import omp_environment; print(json.dumps(omp_environment(Path(".runtime"))))' | ConvertFrom-Json -AsHashtable
+    foreach ($key in $setup.Keys) { [Environment]::SetEnvironmentVariable($key, $setup[$key], 'Process') }
+    & "$data/bin/omp.exe" login openai-codex
+}
 ```
 
-The default Data is this checkout's `.runtime`. Each run copies only the
-hash-verified source manifest into `<data>/build/<run-id>/src`, installs frozen
-Bun dependencies without lifecycle scripts, builds the baseline native addon,
-then builds Windows x64 OMP. Cargo cache/target, Bun caches and temp stay under
-Data. Registries for third-party dependencies may be needed.
+Use your custom Data in both places when applicable. Never put credentials on the
+command line or in Git. Capri keeps sessions and saved permissions across rebuilds.
 
-Success creates `<data>/bin/omp.<run-id>.candidate.exe` and
-`<data>/build/<run-id>/candidate-result.json` with its provenance/hashes.
-This is **candidate-only**: no smoke, promotion, bootstrap or runtime switch.
-It leaves `<data>/bin/omp.exe`, its runtime metadata and existing Capri state
-untouched. The candidate is not yet accepted for running Capri; Steps 3–4
-must verify it and implement promotion. Build logs are ignored under the run
-directory; inherited compiler/wrapper/target overrides cannot select a different
-native compiler recipe, and caller environment/cwd are restored on exit.
-
-Create `.runtime/bot-token` locally, and log in with the official OMP flow using the same private agent directory:
-
-```powershell
-$env:OMP_PROFILE = ''
-$env:PI_PROFILE = ''
-$env:PI_CODING_AGENT_DIR = (Join-Path (Get-Location) '.runtime/agent')
-.runtime/omp.exe login openai-codex
-```
-
-This milestone has no npm installer. Never install an unrelated PyPI package in place of the pinned official SDK.
 The pinned SDK's `stop() -> bool` explicitly confirms reaping, including retained
 survivors, only on `True`. Capri shares this strict contract across owner, Guest,
 and runtime handoff through `capri.teardown.stop_child`; exceptions and other return

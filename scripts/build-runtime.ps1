@@ -1,11 +1,11 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param([string]$Data)
+param([string]$Data, [ValidateRange(1, 600)][int]$SmokeTimeoutSeconds = 180)
 
 # A child scriptblock keeps helper functions/preferences local even when callers
 # dot-source this entry point. No exit: callers retain their own process.
 & {
-    param([string]$RequestedData, [string]$Checkout)
+    param([string]$RequestedData, [string]$Checkout, [int]$SmokeTimeout)
     $ErrorActionPreference = 'Stop'
     $callerLocation = Get-Location
     $savedEnvironment = @{}
@@ -120,7 +120,7 @@ param([string]$Data)
             $toolchainPath = Join-Path $Checkout 'runtime-toolchain.json'
             $toolchain = Get-Content -LiteralPath $toolchainPath -Raw | ConvertFrom-Json -AsHashtable
             $python = Join-Path $Checkout '.venv/Scripts/python.exe'
-            if (-not [IO.File]::Exists($python)) { throw 'Missing checkout .venv; install requirements-test.txt first (bootstrap is a later step).' }
+            if (-not [IO.File]::Exists($python)) { throw 'Missing checkout .venv; run ./scripts/bootstrap.ps1 first.' }
 
             $overrides = @{
                 CARGO_HOME = 'cache/cargo'; CARGO_TARGET_DIR = 'build/target'
@@ -174,32 +174,8 @@ param([string]$Data)
             Require-Version $rustVersion $toolchain.rustc 'rustc'
             Require-Version $cargoVersion $toolchain.cargo 'Cargo'
 
-            # Reuse a prepared Developer shell, otherwise initialize the pinned
-            # installed MSVC/SDK. Never install or modify the system toolchain.
-            if (-not (Get-Command cl -CommandType Application -ErrorAction SilentlyContinue)) {
-                $vswhereCommand = Get-Command vswhere -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-                $vswhere = if ($vswhereCommand) { $vswhereCommand.Source } else {
-                    Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-                }
-                $vs = Invoke-Captured $vswhere @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath') 'vs-location'
-                $devcmd = Join-Path $vs 'Common7/Tools/VsDevCmd.bat'
-                if (-not [IO.File]::Exists($devcmd)) { throw 'VS C++ Build Tools Developer environment is unavailable.' }
-                $setup = 'call "' + $devcmd + '" -no_logo -arch=x64 -host_arch=x64 -vcvars_ver=' + $toolchain.msvc_toolset_directory + ' -winsdk=' + $toolchain.windows_sdk + ' >nul && set'
-                $devEnvironment = Invoke-Captured $env:ComSpec @('/d', '/s', '/c', $setup) 'vs-environment' -OmitOutputLog
-                foreach ($line in $devEnvironment -split "`r?`n") {
-                    if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') }
-                }
-                $cmakeTools = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake'
-                foreach ($directory in @((Join-Path $cmakeTools 'CMake/bin'), (Join-Path $cmakeTools 'Ninja'))) {
-                    if ([IO.Directory]::Exists($directory)) { $env:PATH += [IO.Path]::PathSeparator + $directory }
-                }
-            }
-            if ($env:VCToolsVersion.TrimEnd('\') -ne $toolchain.msvc_toolset_directory -or
-                $env:WindowsSDKVersion.TrimEnd('\') -ne $toolchain.windows_sdk -or $env:VSCMD_ARG_TGT_ARCH -ne 'x64') {
-                throw 'Wrong MSVC toolset/Windows SDK/target architecture.'
-            }
-            $compilerVersion = Invoke-Captured (Tool 'cl') @() 'msvc-version' -AllowedCodes @(0, 2)
-            Require-Version $compilerVersion $toolchain.msvc_compiler 'MSVC compiler'
+            . (Join-Path $PSScriptRoot 'windows-toolchain.ps1')
+            $systemTools = Initialize-CapriWindowsToolchain
             $cmake = Tool 'cmake'
             $ninja = Tool 'ninja'
             $cmakeVersion = Invoke-Captured $cmake @('--version') 'cmake-version'
@@ -266,23 +242,47 @@ param([string]$Data)
                 platform = 'win32'; arch = 'x64'; target = $toolchain.bun_target; profile = $toolchain.profile
                 isa = 'baseline'; rustflags = $toolchain.rustflags
                 tools = @{ python = $pythonVersion; bun = $bunVersion; bun_revision = $bunRevision
-                    rustc = $rustVersion; cargo = $cargoVersion; msvc = $toolchain.msvc_compiler
-                    windows_sdk = $toolchain.windows_sdk; cmake = $toolchain.cmake; ninja = $toolchain.ninja }
+                    rustc = $rustVersion; cargo = $cargoVersion; msvc = $systemTools.msvc; msvc_toolset_directory = $systemTools.msvc_toolset_directory
+                    windows_sdk = $systemTools.windows_sdk; cmake = $toolchain.cmake; ninja = $toolchain.ninja }
                 finished_utc = [DateTimeOffset]::UtcNow.ToString('o'); smoke_passed = $false; promoted = $false
             }
             [IO.File]::WriteAllText((Join-Path $runRoot 'candidate-result.json'), ($result | ConvertTo-Json -Depth 8), $utf8)
-            Write-Host "Candidate only (not smoke-tested or promoted): $candidate"
+            $stage = 'smoke'
+            $smokeRoot = Join-Path $dataRoot "s/$($runId.Substring(0, 4))"
+            $null = Invoke-Captured $python @('scripts/smoke-runtime.py', '--omp', $candidate, '--data', $smokeRoot) 'smoke' -TimeoutSeconds $SmokeTimeout
+            $smoke = Get-Content -LiteralPath (Join-Path $smokeRoot 'smoke-result.json') -Raw | ConvertFrom-Json -AsHashtable
+            foreach ($check in @('passed', 'cli', 'worker', 'config', 'rpc', 'native_extraction', 'teardown')) {
+                if ($smoke[$check] -isnot [bool] -or $smoke[$check] -ne $true) { throw "Smoke did not confirm $check." }
+            }
+            if ($smoke.executable_sha256 -ne $exeHash -or $smoke.native_sha256 -ne $nativeHash -or (Hash $candidate) -ne $exeHash) {
+                throw 'Smoke/candidate/native hash mismatch; previous runtime preserved.'
+            }
+            $stage = 'publication'
+            $final = Join-Path $bin 'omp.exe'
+            Assert-NoReparsePoint $final
+            try {
+                # Same-volume Windows rename/replace. Never delete final first.
+                [IO.File]::Move($candidate, $final, $true)
+            } catch { throw "Cannot replace $final (it may be in use). Stop the bot manually and rerun. $($_.Exception.Message)" }
+            $result.status = 'published'
+            $result.executable_path = $final
+            $result.smoke_passed = $true
+            $result.promoted = $true
+            $result.smoke_result = Join-Path $smokeRoot 'smoke-result.json'
+            $result.finished_utc = [DateTimeOffset]::UtcNow.ToString('o')
+            [IO.File]::WriteAllText((Join-Path $runRoot 'candidate-result.json'), ($result | ConvertTo-Json -Depth 8), $utf8)
+            Write-Host "Built, smoke-tested and published: $final"
             Write-Host "Build record: $(Join-Path $runRoot 'candidate-result.json')"
             $global:LASTEXITCODE = 0
         } finally {
             if ($lockStream) { $lockStream.Dispose() }
         }
     } catch {
-        throw "Runtime candidate build failed at ${stage}: $($_.Exception.Message)"
+        throw "Runtime build failed at ${stage}: $($_.Exception.Message)"
     } finally {
         Set-Location -LiteralPath $callerLocation.Path
         Get-ChildItem Env: | Where-Object { -not $savedEnvironment.ContainsKey($_.Name) } |
             ForEach-Object { Remove-Item -LiteralPath ('Env:' + $_.Name) }
         foreach ($key in $savedEnvironment.Keys) { Set-Item -LiteralPath ('Env:' + $key) -Value $savedEnvironment[$key] }
     }
-} $Data (Split-Path -Parent $PSScriptRoot)
+} $Data (Split-Path -Parent $PSScriptRoot) $SmokeTimeoutSeconds

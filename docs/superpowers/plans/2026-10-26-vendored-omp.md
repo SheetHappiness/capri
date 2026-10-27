@@ -1,3 +1,5 @@
+> Tasks 4–6 are superseded by [the simplified clean-machine bootstrap plan](2026-10-27-clean-machine-bootstrap.md). Earlier implementation/evidence remains historical context.
+
 # Vendored OMP Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans or superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Execution method is not selected by this document. GPT-6 Astra must not be used for subagents.

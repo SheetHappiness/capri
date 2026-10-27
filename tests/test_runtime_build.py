@@ -1,8 +1,8 @@
-"""Task 4, Step 1: RED contracts for the future PowerShell build entry point.
+"""Windows contracts for source build, auth-free smoke and final publication.
 
 Only external build tools and smoke are doubled. The build script itself must
 be copied from the repository and executed, never replaced with a passing fake.
-These tests intentionally fail until scripts/build-runtime.ps1 is implemented.
+Failures must preserve the previous executable and private Capri state.
 """
 
 import hashlib
@@ -90,8 +90,13 @@ if stage == "smoke":
     data.mkdir(parents=True, exist_ok=True)
     report = {"schema_version": 1, "passed": True,
               "executable_sha256": hashlib.sha256(exe.read_bytes()).hexdigest(),
+              "native_sha256": hashlib.sha256(b"fresh-baseline-addon").hexdigest(),
               **{key: True for key in ("cli", "worker", "config", "rpc", "native_extraction", "teardown")}}
+    if scenario == 'false_smoke':
+        report['teardown'] = False
     (data / "smoke-result.json").write_text(json.dumps(report), encoding="utf-8")
+    if scenario == 'changed_candidate':
+        exe.write_bytes(b'changed after smoke')
 versions = json.loads(os.environ["CAPRI_TEST_VERSIONS"])
 if not stage:
     if tool == "bun":
@@ -171,7 +176,7 @@ class BuildCase:
         _write(site / "omp_rpc-0.1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: omp-rpc\nVersion: 0.1.0\n")
         _write(site / "omp_rpc-0.1.0.dist-info/direct_url.json",
                json.dumps({"url": sdk.as_uri(), "dir_info": {}}))
-        for tool in ("bun", "rustc", "cargo", "rustup", "cmake", "ninja", "cl", "vswhere"):
+        for tool in ("bun", "rustc", "cargo", "rustup", "cmake", "ninja", "cl", "link", "vswhere"):
             _write(self.tools / (tool + ".cmd"),
                    f'@"{sys.executable}" "%~dp0driver.py" {tool} %*\n')
         self.env = dict(os.environ)
@@ -186,6 +191,10 @@ class BuildCase:
             "VSCMD_ARG_TGT_ARCH": "x64", "VSCMD_VER": "17.14.0",
             "LIB": "test-msvc-lib", "INCLUDE": "test-msvc-include",
         })
+        sdk_root = self.tools / 'SDK'
+        self.env['WindowsSdkDir'] = str(sdk_root)
+        for name in ('Include/{v}/um/Windows.h', 'Include/{v}/ucrt/corecrt.h', 'Lib/{v}/um/x64/kernel32.lib', 'Lib/{v}/ucrt/x64/ucrt.lib', 'bin/{v}/x64/rc.exe'):
+            _write(sdk_root / name.format(v=self.versions['windows_sdk']), '')
         self.private = {}
         for name, value in {
             "bin/omp.exe": b"old-good-exe", "bin/runtime-build.json": b'{"old":true}\n',
@@ -217,6 +226,9 @@ class BuildCase:
         script = ROOT / "scripts/build-runtime.ps1"
         assert script.is_file(), "RED: scripts/build-runtime.ps1 is not implemented (Task 4 Step 1)"
         shutil.copy2(script, self.checkout / "scripts/build-runtime.ps1")
+        helper = ROOT / 'scripts/windows-toolchain.ps1'
+        if helper.exists():
+            shutil.copy2(helper, self.checkout / 'scripts/windows-toolchain.ps1')
         self.env["CAPRI_TEST_SCENARIO"] = scenario
         shell = shutil.which("pwsh")
         assert shell, "PowerShell 7 is required for the Windows build contract tests"
@@ -228,7 +240,7 @@ $before = @{{cwd=(Get-Location).Path; env=@{{}}}}
 Get-ChildItem Env: | ForEach-Object {{ $before.env[$_.Name] = $_.Value }}
 $code = 0
 try {{
-    {invocation} {_ps_string(self.checkout / 'scripts/build-runtime.ps1')} -Data {_ps_string(data_arg if data_arg is not None else self.data)}
+    {invocation} {_ps_string(self.checkout / 'scripts/build-runtime.ps1')} -Data {_ps_string(data_arg if data_arg is not None else self.data)} -SmokeTimeoutSeconds 2
     if ($LASTEXITCODE) {{ $code = $LASTEXITCODE }}
 }} catch {{
     [Console]::Error.WriteLine($_.ToString())
@@ -440,18 +452,18 @@ def _candidate(case):
     reports = list((case.data / "build").glob("*/candidate-result.json"))
     assert reports, "successful candidate build must record its staging path and hash"
     report = json.loads(reports[-1].read_text(encoding="utf-8-sig"))
-    candidate = Path(report["candidate_path"])
+    candidate = Path(report.get("executable_path", report["candidate_path"]))
     assert candidate.is_absolute() and candidate.parent == case.data / "bin"
-    assert candidate.name != "omp.exe"
+    assert candidate.name == "omp.exe"
     assert candidate.read_bytes() == b"fresh-candidate-exe"
     assert report["executable_sha256"] == _hash(candidate)
     assert report["native_sha256"] == hashlib.sha256(b"fresh-baseline-addon").hexdigest()
-    assert report["status"] == "candidate-only"
-    assert report["smoke_passed"] is False and report["promoted"] is False
+    assert report["status"] == "published"
+    assert report["smoke_passed"] is True and report["promoted"] is True
     return candidate
 
 
-def test_step2_stages_current_run_candidate_without_smoke_or_promotion(build_case):
+def test_pipeline_builds_fresh_candidate_then_smokes_and_publishes(build_case):
     case = build_case
     # A previously generated addon/binary must not enter the verified snapshot.
     for name in (ADDON, BINARY):
@@ -460,17 +472,18 @@ def test_step2_stages_current_run_candidate_without_smoke_or_promotion(build_cas
         path.write_bytes(b"stale build output")
     result = case.run()
     assert result.returncode == 0, result.stdout + result.stderr
-    assert case.stages() == ["install", "native", "binary"]
+    assert case.stages() == STAGES
     first = _candidate(case)
-    case.assert_preserved()
+    case.assert_preserved(artifact=False)
     result = case.run()
     assert result.returncode == 0, result.stdout + result.stderr
     reports = list((case.data / "build").glob("*/candidate-result.json"))
     assert len(reports) == 2
     candidates = {Path(json.loads(p.read_text(encoding="utf-8-sig"))["candidate_path"]) for p in reports}
-    assert first in candidates and len(candidates) == 2
-    assert case.stages() == ["install", "native", "binary"] * 2
-    case.assert_preserved()
+    assert len(candidates) == 2
+    assert first == case.data / 'bin/omp.exe'
+    assert case.stages() == STAGES * 2
+    case.assert_preserved(artifact=False)
 
 
 def test_step2_environment_is_restored_after_candidate_build(build_case):
@@ -479,7 +492,7 @@ def test_step2_environment_is_restored_after_candidate_build(build_case):
                      if key not in ("HOME", "USERPROFILE", "PATH", "LIB", "INCLUDE")})
     result = case.run(data_arg=os.path.relpath(case.data, case.caller), dot_source=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert case.stages() == ["install", "native", "binary"]
+    assert case.stages() == STAGES
     for event in case.events():
         if event["stage"] not in ("install", "native", "binary"):
             continue
@@ -509,7 +522,7 @@ def test_step2_environment_is_restored_after_candidate_build(build_case):
     binary = next(e for e in case.events() if e["stage"] == "binary")
     assert binary["argv"] == ["scripts/ci-release-build-binaries.ts", "--targets", "win32-x64"]
     _candidate(case)
-    case.assert_preserved()
+    case.assert_preserved(artifact=False)
 
 
 def test_step2_initializes_vs_environment_from_a_path_with_spaces(build_case):
@@ -523,8 +536,62 @@ def test_step2_initializes_vs_environment_from_a_path_with_spaces(build_case):
            f'@set "PATH=%PATH%;{compiler}"\n')
     result = case.run()
     assert result.returncode == 0, result.stdout + result.stderr
-    assert case.stages() == ["install", "native", "binary"]
+    assert case.stages() == STAGES
     logs = list((case.data / "build").glob("*/vs-environment.log"))
-    assert logs and all(case.env["CAPRI_TEST_PRIVATE_VALUE"] not in p.read_text(encoding="utf-8") for p in logs)
+    assert all(case.env["CAPRI_TEST_PRIVATE_VALUE"] not in p.read_text(encoding="utf-8") for p in logs)
     _candidate(case)
+    case.assert_preserved(artifact=False)
+
+
+def test_build_accepts_newer_system_toolchain_and_records_actual_versions(build_case):
+    case = build_case
+    actual = dict(case.versions, msvc_compiler='19.45.99999')
+    case.env['CAPRI_TEST_VERSIONS'] = json.dumps(actual)
+    case.env['VCToolsVersion'] = '14.45.99999'
+    case.env['WindowsSDKVersion'] = '10.0.99999.0\\'
+    for name in ('Include/{v}/um/Windows.h', 'Include/{v}/ucrt/corecrt.h', 'Lib/{v}/um/x64/kernel32.lib', 'Lib/{v}/ucrt/x64/ucrt.lib', 'bin/{v}/x64/rc.exe'):
+        _write(Path(case.env['WindowsSdkDir']) / name.format(v='10.0.99999.0'), '')
+    result = case.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(next((case.data / 'build').glob('*/candidate-result.json')).read_text(encoding='utf-8'))
+    assert '19.45.99999' in report['tools']['msvc']
+    assert report['tools']['msvc_toolset_directory'] == '14.45.99999'
+    assert report['tools']['windows_sdk'] == '10.0.99999.0'
+
+
+@pytest.mark.parametrize('key,value', [('VSCMD_ARG_TGT_ARCH', 'x86'), ('WindowsSDKVersion', 'missing'), ('VSCMD_VER', '16.0')])
+def test_build_rejects_missing_sdk_or_wrong_architecture(build_case, key, value):
+    case = build_case
+    case.env[key] = value
+    result = case.run()
+    assert result.returncode != 0
+    assert case.stages() == []
+    case.assert_preserved()
+
+
+@pytest.mark.parametrize('scenario', ['changed_candidate', 'false_smoke'])
+def test_invalid_smoke_evidence_preserves_final(build_case, scenario):
+    case = build_case
+    result = case.run(scenario)
+    assert result.returncode != 0
+    assert case.stages() == STAGES
+    case.assert_preserved()
+
+
+def test_locked_destination_preserves_runtime_without_killing_bot(build_case):
+    case = build_case
+    with (case.data / 'bin/omp.exe').open('rb'):
+        result = case.run()
+    assert result.returncode != 0
+    assert case.stages() == STAGES
+    case.assert_preserved()
+
+
+def test_missing_sdk_version_has_actionable_diagnostic(build_case):
+    case = build_case
+    case.env.pop('WindowsSDKVersion', None)
+    result = case.run()
+    assert result.returncode != 0
+    assert 'Windows SDK' in result.stderr
+    assert case.stages() == []
     case.assert_preserved()
