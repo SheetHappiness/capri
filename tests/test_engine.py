@@ -185,9 +185,14 @@ def test_failed_turn_stops_process_before_next_request(tmp_path):
         assert len(e.client.messages)==1
     asyncio.run(run())
 
-def test_profile_environment_cannot_override_private_storage(tmp_path):
+def test_profile_environment_cannot_override_private_storage(tmp_path, assert_private_omp_environment):
+    class CheckedSDK(SDK):
+        def start(self):
+            assert_private_omp_environment(self.kw['env'], tmp_path)
+            return super().start()
     async def run():
-        e=Engine(tmp_path/'omp.exe',tmp_path,sdk_factory=SDK); await e.start()
+        e=Engine(tmp_path/'omp.exe',tmp_path,sdk_factory=CheckedSDK); await e.start()
+        assert e.client.kw['session_dir'] == tmp_path/'agent/sessions'
         assert e.client.kw['env']['OMP_PROFILE']==''
         assert e.client.kw['env']['PI_PROFILE']==''
         await e.close()

@@ -13,7 +13,7 @@ from capri.engine import Engine, EngineError
 from test_engine import SDK
 
 
-def test_native_permission_cli_and_saved_config_survive_start(tmp_path, monkeypatch):
+def test_native_permission_cli_and_saved_config_survive_start(tmp_path, monkeypatch, assert_private_omp_environment):
     config = tmp_path/'agent/config.yml'
     config.parent.mkdir()
     original = 'tools:\n  approvalMode: write\nstartup:\n  quiet: true\n'
@@ -23,6 +23,8 @@ def test_native_permission_cli_and_saved_config_survive_start(tmp_path, monkeypa
 
     def run_cli(argv, **kw):
         nonlocal saved
+        assert_private_omp_environment(kw['env'], tmp_path, merged=True)
+        assert kw['env']['NO_COLOR'] == '1'
         calls.append((argv, kw))
         assert argv[:4] == [str((tmp_path/'omp.exe').resolve()), 'config', argv[2], 'tools.approvalMode']
         if argv[2] == 'set':

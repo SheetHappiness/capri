@@ -1,0 +1,5 @@
+# Vendored bytes are verified against the upstream archive, including on Windows.
+vendor/omp/** -text -filter -whitespace
+vendor/omp-source-manifest.json text eol=lf
+# Patch context must retain the upstream whitespace it records.
+vendor/omp-patches/** text eol=lf -whitespace

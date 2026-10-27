@@ -14,8 +14,21 @@ APPROVAL_MODES = ('yolo', 'write', 'always-ask', 'always-ask-cached')
 
 
 def omp_environment(data: Path) -> dict[str, str]:
-    return {'PI_CODING_AGENT_DIR': str(data / 'agent'), 'OMP_PROFILE': '',
-            'PI_PROFILE': '', 'PI_CONFIG_DIR': '.capri-omp'}
+    """Prepare private OMP state before spawn without changing the parent env."""
+    data = data.resolve()
+    directories = {
+        'CAPRI_OMP_ROOT': data / 'omp-root',
+        'PI_CODING_AGENT_DIR': data / 'agent',
+        'PI_NATIVES_DIR': data / 'cache/natives',
+        # OMP's runtime/plugin installers re-enter Bun and inherit this cache.
+        'BUN_INSTALL_CACHE_DIR': data / 'cache/bun',
+        'BUN_RUNTIME_TRANSPILER_CACHE_PATH': data / 'cache/transpiler',
+        'TEMP': data / 'tmp', 'TMP': data / 'tmp',
+    }
+    for directory in directories.values():
+        directory.mkdir(parents=True, exist_ok=True)
+    return {**{key: str(value) for key, value in directories.items()},
+            'OMP_PROFILE': '', 'PI_PROFILE': '', 'PI_CONFIG_DIR': '.capri-omp'}
 
 
 def omp_isolation_args(data: Path) -> list[str]:

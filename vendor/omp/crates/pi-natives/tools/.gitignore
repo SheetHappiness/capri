@@ -1,0 +1,16 @@
+# Downloaded raw tokenizer sources; generated data/*.bin.zst is committed.
+cache/
+
+# Capri: keep pinned upstream fixtures/source visible to Git.
+!/cache/
+/cache/*
+!/cache/cl100k_base.tiktoken
+!/cache/ctok_v3.bin
+!/cache/ctok_v4_7.bin
+!/cache/deepseek-v3.tokenizer.json
+!/cache/deepseek-v4.tokenizer.json
+!/cache/glm-5.tokenizer.json
+!/cache/kimi.tiktoken.model
+!/cache/o200k_base.tiktoken
+!/cache/qwen3.8.tokenizer.json
+!/cache/tokenization_kimi.py

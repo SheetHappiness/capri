@@ -1,0 +1,4 @@
+** text eol=lf
+
+# Capri: preserve pinned archive bytes; do not invoke Git LFS.
+* -text -filter !eol

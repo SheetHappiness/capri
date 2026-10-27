@@ -4,3 +4,11 @@ __pycache__/
 .pytest_cache/
 .env
 *.egg-info/
+
+# OMP generated artifacts. Upstream source/fixtures are retained by its manifest.
+vendor/omp/**/node_modules/
+vendor/omp/target/
+vendor/omp/**/dist/
+vendor/omp/**/.build/
+vendor/omp/**/.cache/
+vendor/omp/packages/coding-agent/binaries/

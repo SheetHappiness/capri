@@ -1,0 +1,3 @@
+# Run from the checkout root: explicitly select this SDK before resolving Capri.
+./vendor/omp/sdk/python/omp-rpc
+-e .
